@@ -4,19 +4,19 @@
 Результаты сохраняются рядом со скриптом в results/statistics.
 """
 
-from pathlib import Path
 import argparse
 import os
+from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
 os.environ.setdefault("MPLCONFIGDIR", str(BASE / ".matplotlib"))
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy import stats
-
 
 COLUMNS = (
     "symboling normalized-losses make fuel-type aspiration num-of-doors "
@@ -26,27 +26,42 @@ COLUMNS = (
 ).split()
 SELECTED = ["symboling", "drive-wheels", "curb-weight"]
 NUMERIC = ["curb-weight"]
-LEVELS = {"symboling": list(range(-3, 4)), "drive-wheels": ["4wd", "fwd", "rwd"]}
+LEVELS = {
+    "symboling": list(range(-3, 4)),
+    "drive-wheels": ["4wd", "fwd", "rwd"],
+}
 ALPHA = 0.05
 
 
 def markdown_table(frame):
     """Таблица Markdown без дополнительной зависимости tabulate."""
+
     def fmt(value):
-        return f"{value:.6g}" if isinstance(value, (float, np.floating)) else str(value)
+        return (
+            f"{value:.6g}"
+            if isinstance(value, (float, np.floating))
+            else str(value)
+        )
+
     rows = [[str(frame.index.name or "Показатель"), *map(str, frame.columns)]]
     rows += [[str(idx), *map(fmt, row)] for idx, row in frame.iterrows()]
-    return "\n".join([
-        "| " + " | ".join(rows[0]) + " |",
-        "| " + " | ".join(["---"] * len(rows[0])) + " |",
-        *["| " + " | ".join(row) + " |" for row in rows[1:]],
-    ])
+    return "\n".join(
+        [
+            "| " + " | ".join(rows[0]) + " |",
+            "| " + " | ".join(["---"] * len(rows[0])) + " |",
+            *["| " + " | ".join(row) + " |" for row in rows[1:]],
+        ]
+    )
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data", type=Path, default=BASE / "data/imports-85.data")
-    parser.add_argument("--output", type=Path, default=BASE / "results/statistics")
+    parser.add_argument(
+        "--data", type=Path, default=BASE / "data/imports-85.data"
+    )
+    parser.add_argument(
+        "--output", type=Path, default=BASE / "results/statistics"
+    )
     args = parser.parse_args()
     raw = pd.read_csv(args.data, header=None, na_values="?")
     if raw.shape[1] != len(COLUMNS):
@@ -61,32 +76,40 @@ def main():
     if not data["curb-weight"].dropna().between(1488, 4066).all():
         raise ValueError("curb-weight вне указанного диапазона")
     if len(data) < 3 or data[SELECTED].isna().any().any():
-        raise ValueError("Недостаточно наблюдений или есть пропуски; нужна отдельная обработка")
+        raise ValueError(
+            "Недостаточно наблюдений или есть пропуски; нужна отдельная обработка"
+        )
 
     out = args.output
     out.mkdir(parents=True, exist_ok=True)
     k_sturges = int(np.ceil(1 + np.log2(len(data))))
+
     def save_table(frame, name):
         frame.to_csv(out / f"{name}.csv", encoding="utf-8-sig")
 
-    quality = pd.DataFrame({
-        "Тип": ["порядковый", "номинальный", "количественный"],
-        "Наблюдений": data.count(), "Пропусков": data.isna().sum(),
-        "Уникальных значений": data.nunique(),
-    }, index=SELECTED)
+    quality = pd.DataFrame(
+        {
+            "Тип": ["порядковый", "номинальный", "количественный"],
+            "Наблюдений": data.count(),
+            "Пропусков": data.isna().sum(),
+            "Уникальных значений": data.nunique(),
+        },
+        index=SELECTED,
+    )
     save_table(quality, "data_quality")
     summary = pd.DataFrame(index=NUMERIC)
     for column in NUMERIC:
         x = data[column]
-        q1, q3 = x.quantile([0.25, 0.75])
         values = {
-            "n": len(x), "Среднее": x.mean(), "Медиана": x.median(),
+            "n": len(x),
+            "Среднее": x.mean(),
+            "Медиана": x.median(),
             "Моды": ", ".join(map(str, x.mode().tolist())),
-            "Минимум": x.min(), "Максимум": x.max(),
-            "Размах": x.max() - x.min(), "Q1": q1, "Q3": q3,
-            "IQR": q3 - q1, "Дисперсия (ddof=1)": x.var(ddof=1),
+            "Минимум": x.min(),
+            "Максимум": x.max(),
+            "Размах": x.max() - x.min(),
+            "Дисперсия (ddof=1)": x.var(ddof=1),
             "Станд. отклонение (ddof=1)": x.std(ddof=1),
-            "Асимметрия": x.skew(), "Эксцесс": x.kurt(),
         }
         for key, value in values.items():
             summary.loc[column, key] = value
@@ -95,11 +118,15 @@ def main():
     frequencies = {}
     for column, levels in LEVELS.items():
         counts = data[column].value_counts().reindex(levels, fill_value=0)
-        frequencies[column] = pd.DataFrame({"Частота": counts, "Доля, %": counts / len(data) * 100})
+        frequencies[column] = pd.DataFrame(
+            {"Частота": counts, "Доля, %": counts / len(data) * 100}
+        )
         save_table(frequencies[column], f"frequencies_{column}")
     symbol_counts = frequencies["symboling"]["Частота"]
     most_common_count = int(symbol_counts.max())
-    most_common_levels = ", ".join(map(str, symbol_counts[symbol_counts == most_common_count].index))
+    most_common_levels = ", ".join(
+        map(str, symbol_counts[symbol_counts == most_common_count].index)
+    )
     most_common_percent = most_common_count / len(data) * 100
 
     # Нормальность имеет содержательный смысл для количественной массы.
@@ -107,32 +134,66 @@ def main():
     weight = data["curb-weight"]
     # Нормальность оцениваем описательно, без специальных критериев.
     contingency = pd.crosstab(data["symboling"], data["drive-wheels"]).reindex(
-        index=LEVELS["symboling"], columns=LEVELS["drive-wheels"], fill_value=0)
+        index=LEVELS["symboling"], columns=LEVELS["drive-wheels"], fill_value=0
+    )
     column_percent = contingency.div(contingency.sum(axis=0), axis=1) * 100
     save_table(contingency, "contingency_counts")
     save_table(column_percent, "contingency_column_percent")
     # Пустой уровень -3 показываем в таблице, но исключаем из расчёта V.
     observed = contingency.loc[contingency.sum(axis=1) > 0].to_numpy()
-    expected = np.outer(observed.sum(axis=1), observed.sum(axis=0)) / observed.sum()
+    expected = (
+        np.outer(observed.sum(axis=1), observed.sum(axis=0)) / observed.sum()
+    )
     chi_square = np.sum((observed - expected) ** 2 / expected)
-    cramers_v = np.sqrt(chi_square / (observed.sum() * min(np.array(observed.shape) - 1)))
-    save_table(pd.DataFrame(expected, index=contingency.index[contingency.sum(axis=1) > 0],
-                            columns=contingency.columns), "contingency_expected")
-    save_table(pd.DataFrame({"V Крамера": [cramers_v]}, index=["symboling / drive-wheels"]),
-               "categorical_association")
+    cramers_v = np.sqrt(
+        chi_square / (observed.sum() * min(np.array(observed.shape) - 1))
+    )
+    save_table(
+        pd.DataFrame(
+            expected,
+            index=contingency.index[contingency.sum(axis=1) > 0],
+            columns=contingency.columns,
+        ),
+        "contingency_expected",
+    )
+    save_table(
+        pd.DataFrame(
+            {"V Крамера": [cramers_v]}, index=["symboling / drive-wheels"]
+        ),
+        "categorical_association",
+    )
     rho, p_corr = stats.spearmanr(data["symboling"], weight)
-    strength = "слабая" if abs(rho) < 0.3 else "умеренная" if abs(rho) < 0.7 else "сильная"
-    significance = "статистически значима" if p_corr < ALPHA else "статистически незначима"
-    correlation = pd.DataFrame({"rho Спирмена": [rho], "p-value (двустороннее)": [p_corr],
-                                "n": [len(data)], "alpha": [ALPHA],
-                                "Сила связи": [strength], "Значимость": [significance]},
-                               index=["symboling / curb-weight"])
+    strength = (
+        "слабая"
+        if abs(rho) < 0.3
+        else "умеренная" if abs(rho) < 0.7 else "сильная"
+    )
+    significance = (
+        "статистически значима"
+        if p_corr < ALPHA
+        else "статистически незначима"
+    )
+    correlation = pd.DataFrame(
+        {
+            "rho Спирмена": [rho],
+            "p-value (двустороннее)": [p_corr],
+            "n": [len(data)],
+            "alpha": [ALPHA],
+            "Сила связи": [strength],
+            "Значимость": [significance],
+        },
+        index=["symboling / curb-weight"],
+    )
     save_table(correlation, "rank_correlation")
-    weight_by_drive = data.groupby("drive-wheels")["curb-weight"].agg(["count", "mean", "median"])
+    weight_by_drive = data.groupby("drive-wheels")["curb-weight"].agg(
+        ["count", "mean", "median"]
+    )
     save_table(weight_by_drive, "weight_by_drive")
 
     plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 10})
-    fig, axes = plt.subplots(1, len(NUMERIC), figsize=(7, 4.6), layout="constrained", squeeze=False)
+    fig, axes = plt.subplots(
+        1, len(NUMERIC), figsize=(7, 4.6), layout="constrained", squeeze=False
+    )
     bin_rows = []
     for ax, column in zip(axes.flat, NUMERIC):
         x = data[column]
@@ -140,12 +201,22 @@ def main():
         edges = np.linspace(x.min(), x.max(), k + 1)
         counts, _ = np.histogram(x, bins=edges)
         for i, count in enumerate(counts):
-            bin_rows.append({"Признак": column, "Интервал": i + 1,
-                             "Левая граница": edges[i], "Правая граница": edges[i+1],
-                             "Частота": int(count), "Правая граница включена": i == k - 1})
+            bin_rows.append(
+                {
+                    "Признак": column,
+                    "Интервал": i + 1,
+                    "Левая граница": edges[i],
+                    "Правая граница": edges[i + 1],
+                    "Частота": int(count),
+                    "Правая граница включена": i == k - 1,
+                }
+            )
         ax.hist(x, bins=edges, edgecolor="white", color="#3576a8")
-        ax.set(title=f"{column}: k = {k}, h = {(x.max()-x.min())/k:.3f}",
-               xlabel=column, ylabel="Частота")
+        ax.set(
+            title=f"{column}: k = {k}, h = {(x.max()-x.min())/k:.3f}",
+            xlabel=column,
+            ylabel="Частота",
+        )
         ax.grid(axis="y", alpha=0.2)
     fig.savefig(out / "histograms_sturges.png", dpi=170)
     plt.close(fig)
@@ -156,24 +227,18 @@ def main():
         counts = frequencies[column]["Частота"]
         percentages = frequencies[column]["Доля, %"]
         bars = ax.bar(counts.index.astype(str), percentages, color="#3576a8")
-        ax.bar_label(bars, labels=[f"{v:.2f}%" for v in percentages], padding=3)
-        ax.set(title=f"Распределение {column}", xlabel=column, ylabel="Доля автомобилей, %")
+        ax.bar_label(
+            bars, labels=[f"{v:.2f}%" for v in percentages], padding=3
+        )
+        ax.set(
+            title=f"Распределение {column}",
+            xlabel=column,
+            ylabel="Доля автомобилей, %",
+        )
         ax.set_ylim(0, percentages.max() * 1.15)
     fig.savefig(out / "category_frequencies.png", dpi=170)
     plt.close(fig)
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4.8), layout="constrained")
-    axes[0].boxplot(weight, tick_labels=["curb-weight"])
-    axes[0].set(title="Диаграмма размаха", ylabel="curb-weight (исходная шкала)")
-    stats.probplot(weight, dist="norm", plot=axes[1])
-    axes[1].set(title="Q-Q график curb-weight", xlabel="Теоретические квантили N(0, 1)",
-                ylabel="Упорядоченные наблюдения")
-    fig.savefig(out / "weight_diagnostics.png", dpi=170)
-    plt.close(fig)
-
-    q1, q3 = weight.quantile([0.25, 0.75])
-    lower, upper = q1 - 1.5 * (q3 - q1), q3 + 1.5 * (q3 - q1)
-    outlier_count = int(((weight < lower) | (weight > upper)).sum())
     report = f"""# Лабораторная работа №1: описательная статистика и корреляционный анализ
 
 Дисциплина: «Методы анализа данных». Выполнены пункты 1-8 задания.
@@ -200,8 +265,7 @@ def main():
 
 {markdown_table(summary.T)}
 
-Выборочные дисперсия и стандартное отклонение рассчитаны с делителем n-1. Квартили рассчитаны линейной интерполяцией pandas.
-Асимметрия и эксцесс - исправленные выборочные оценки; эксцесс нормального распределения равен 0.
+Выборочные дисперсия и стандартное отклонение рассчитаны с делителем n-1.
 Числовые описательные статистики рассчитаны только для `curb-weight`.
 Категориальные `symboling` (порядковая) и `drive-wheels` (номинальная) описываются частотами и процентными долями. Доля категории равна её частоте, делённой на число автомобилей и умноженной на 100%.
 
@@ -230,17 +294,11 @@ def main():
 
 ### Оценка согласованности с нормальным распределением (пункт 2)
 
-Распределение массы оценивается по гистограмме, Q-Q графику, асимметрии и эксцессу, без формальных критериев нормальности.
-Среднее ({weight.mean():.2f}) больше медианы ({weight.median():.2f}), асимметрия положительная ({weight.skew():.3f}).
-Гистограмма имеет правый хвост; точки Q-Q графика отклоняются от прямой, особенно на краях.
-Эксцесс ({weight.kurt():.3f}) близок к нулю, но одного этого признака недостаточно для вывода о нормальности.
-По совокупности описательных признаков распределение массы отличается от симметричного нормального; в дальнейшем используем ранговую корреляцию.
-Это описательная оценка, а не формальное отклонение гипотезы нормальности.
+Нормальность оценивается визуально по гистограмме. При нормальном распределении ожидается форма симметричного колокола: большинство значений находится около центра, а к краям частоты постепенно уменьшаются.
+Гистограмма `curb-weight` не вполне соответствует этой форме: она несимметрична и имеет вытянутый правый хвост.
+По визуальной оценке есть отклонения от нормальной формы. Для дальнейшего анализа выбран ранговый коэффициент корреляции Спирмена, который также подходит для порядковой переменной symboling.
+Визуальная оценка не является строгой проверкой гипотезы нормальности.
 `symboling` имеет конечную порядковую шкалу, а `drive-wheels` - номинальную: проверка их на непрерывное нормальное распределение содержательно не требуется.
-
-![Диагностика массы](weight_diagnostics.png)
-
-По правилу 1.5 IQR границы для массы составляют [{lower:.2f}; {upper:.2f}]; за ними {outlier_count} наблюдений. Это диагностическое правило, а не основание автоматического удаления данных.
 
 ## 4. Таблица сопряжённости
 
@@ -288,8 +346,8 @@ p-значение вычислено стандартным асимптоти�
 
 ## 8. Интерпретация результатов
 
-1. Средняя масса равна {weight.mean():.2f}, медиана - {weight.median():.2f}, стандартное отклонение - {weight.std(ddof=1):.2f}. Центральные 50% наблюдений лежат от {q1:.2f} до {q3:.2f}.
-2. Асимметрия массы равна {weight.skew():.3f}; гистограмма и Q-Q график указывают на отклонения от нормальной формы. Использован ранговый анализ.
+1. Средняя масса равна {weight.mean():.2f}, медиана - {weight.median():.2f}, стандартное отклонение - {weight.std(ddof=1):.2f}. Значения лежат от {weight.min()} до {weight.max()}.
+2. Гистограмма массы несимметрична и имеет вытянутый правый хвост: визуально есть отклонения от нормальной формы. Использован ранговый анализ.
 3. Самый частый уровень symboling - {most_common_levels}: {most_common_count} автомобилей ({most_common_percent:.2f}%). Уровень -3 отсутствует в выборке (0%).
 4. Передний привод встречается у {int(frequencies['drive-wheels'].loc['fwd', 'Частота'])} автомобилей ({frequencies['drive-wheels'].loc['fwd', 'Доля, %']:.2f}%). Полный привод представлен всего 9 наблюдениями; группы имеют разный размер.
 5. Более тяжёлые автомобили имеют тенденцию к меньшему symboling: rho = {rho:.3f}, p = {p_corr:.6g}. Связь {strength} и {significance}; она не позволяет точно предсказывать риск отдельного автомобиля.
@@ -298,7 +356,9 @@ p-значение вычислено стандартным асимптоти�
     (out / "report.md").write_text(report, encoding="utf-8")
     print(summary.to_string())
     print(frequencies["symboling"].to_string())
-    print(f"Самый частый symboling: {most_common_levels} ({most_common_percent:.2f}%)")
+    print(
+        f"Самый частый symboling: {most_common_levels} ({most_common_percent:.2f}%)"
+    )
     print(contingency.to_string())
     print(correlation.to_string())
     print(f"Результаты: {out}")
