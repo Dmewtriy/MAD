@@ -1,0 +1,2 @@
+﻿,observations,parameters,converged,iterations,log_likelihood,deviance,aic,mcfadden_pseudo_r_squared,likelihood_ratio,model_p_value,rmse_shifted_scale,residual_mean,residual_variance
+poisson,205,4,True,5,-346.2489133507062,113.33950129968282,700.4978267014124,0.010447327961133568,7.311133719658869,0.0626150691120867,1.2014489006986864,1.725002053979218e-05,0.5303539948140892
