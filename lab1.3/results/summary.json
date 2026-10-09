@@ -1,0 +1,63 @@
+{
+  "dataset": "1985 Auto Imports (Automobile)",
+  "data_sha256": "125db8bd36a84801f7223faf54071d15f85f26c13a9a7aee63375ac46098fb7f",
+  "alpha": 0.05,
+  "total_rows": 205,
+  "analysis_rows": 201,
+  "excluded_rows": 4,
+  "dependent_variable": "price",
+  "factor1": "drive-wheels",
+  "factor2": "aspiration",
+  "one_way": {
+    "F": 67.95406500780399,
+    "df1": 2,
+    "df2": 198,
+    "p_value": 3.394544357715072e-23,
+    "F_critical": 3.041518245686613,
+    "eta_squared": 0.40702252445681747,
+    "omega_squared": 0.399835411607856,
+    "welch_F": 44.71976320496254,
+    "welch_df2": 19.355931929540976,
+    "welch_p_value": 5.5397893405429355e-08,
+    "levene_F": 18.48874973235117,
+    "levene_p_value": 4.3476274615481516e-08,
+    "variance_ratio": 7.6295457688482
+  },
+  "kruskal": {
+    "H": 93.18890458365024,
+    "H_before_tie_correction": 93.18787175258126,
+    "tie_correction": 0.999988916802128,
+    "df": 2,
+    "p_value": 5.811476451548733e-21,
+    "chi2_critical": 5.991464547107979,
+    "epsilon_squared": 0.4605500231497487
+  },
+  "two_way": {
+    "n": 201,
+    "parameters": 6,
+    "df_residual": 195,
+    "R_squared": 0.4236732307335682,
+    "adjusted_R_squared": 0.4088956212651982,
+    "SSE": 7279682947.688445,
+    "MSE": 37331707.424043305,
+    "residual_shapiro_W": 0.8764667341420409,
+    "residual_shapiro_p_value": 9.323359867412544e-12,
+    "cell_levene_F": 9.50132699322594,
+    "cell_levene_p_value": 3.989163191312543e-08,
+    "minimum_cell_count": 2
+  },
+  "verification": {
+    "one_way_manual_vs_scipy": "passed",
+    "welch_manual_vs_scipy": "passed",
+    "kruskal_manual_vs_scipy": "passed",
+    "two_way_nested_models_vs_type3": "passed"
+  },
+  "packages": {
+    "numpy": "2.5.3",
+    "pandas": "3.0.6",
+    "scipy": "1.18.1",
+    "matplotlib": "3.11.2",
+    "statsmodels": "0.15.0",
+    "python-docx": "1.2.0"
+  }
+}

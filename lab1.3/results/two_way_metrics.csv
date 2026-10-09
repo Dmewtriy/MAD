@@ -1,0 +1,2 @@
+﻿n,parameters,df_residual,R_squared,adjusted_R_squared,SSE,MSE,residual_shapiro_W,residual_shapiro_p_value,cell_levene_F,cell_levene_p_value,minimum_cell_count
+201,6,195,0.4236732307335682,0.4088956212651982,7279682947.688445,37331707.424043305,0.8764667341420409,9.323359867412544e-12,9.50132699322594,3.989163191312543e-08,2

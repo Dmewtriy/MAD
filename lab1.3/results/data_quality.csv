@@ -1,0 +1,4 @@
+﻿variable,type,total_rows,valid_before,missing_before,unique_before,valid_after
+price,quantitative,205,201,4,186,201
+drive-wheels,nominal,205,205,0,3,201
+aspiration,nominal,205,205,0,2,201
