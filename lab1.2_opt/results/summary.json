@@ -1,0 +1,45 @@
+{
+  "n": 205,
+  "levels": [
+    -2,
+    -1,
+    0,
+    1,
+    2,
+    3
+  ],
+  "seed": 12026,
+  "null_log_likelihood": -322.90758659811263,
+  "models": {
+    "logit": {
+      "observations": 205,
+      "parameters": 8,
+      "converged": true,
+      "log_likelihood": -313.8519213616819,
+      "aic": 643.7038427233638,
+      "mcfadden_pseudo_r_squared": 0.028044138980547806,
+      "likelihood_ratio": 18.111330472861482,
+      "lr_df": 3,
+      "model_p_value": 0.0004171957692684163,
+      "residual_mean": 0.008323603885775736,
+      "residual_variance": 0.96254476373425,
+      "max_group_abs_mean": 0.26561846570792275,
+      "group_variance_ratio": 6.50250597194992
+    },
+    "probit": {
+      "observations": 205,
+      "parameters": 8,
+      "converged": true,
+      "log_likelihood": -315.273747403385,
+      "aic": 646.54749480677,
+      "mcfadden_pseudo_r_squared": 0.023640940973705282,
+      "likelihood_ratio": 15.267678389455227,
+      "lr_df": 3,
+      "model_p_value": 0.001601615348776986,
+      "residual_mean": -0.009028429434530645,
+      "residual_variance": 0.9502455785196071,
+      "max_group_abs_mean": 0.2194547419779863,
+      "group_variance_ratio": 6.632575871089667
+    }
+  }
+}

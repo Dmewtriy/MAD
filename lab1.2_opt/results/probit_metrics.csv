@@ -1,0 +1,2 @@
+﻿observations,parameters,converged,log_likelihood,aic,mcfadden_pseudo_r_squared,likelihood_ratio,lr_df,model_p_value,residual_mean,residual_variance,max_group_abs_mean,group_variance_ratio
+205,8,True,-315.273747403385,646.54749480677,0.023640940973705282,15.267678389455227,3,0.001601615348776986,-0.009028429434530645,0.9502455785196071,0.2194547419779863,6.632575871089667
