@@ -15,13 +15,9 @@
     "p_value": 3.394544357715072e-23,
     "F_critical": 3.041518245686613,
     "eta_squared": 0.40702252445681747,
-    "omega_squared": 0.399835411607856,
-    "welch_F": 44.71976320496254,
-    "welch_df2": 19.355931929540976,
-    "welch_p_value": 5.5397893405429355e-08,
-    "levene_F": 18.48874973235117,
-    "levene_p_value": 4.3476274615481516e-08,
-    "variance_ratio": 7.6295457688482
+    "Q1": 5141171794.578963,
+    "Q2": 7490000894.057854,
+    "Q_total": 12631172688.636816
   },
   "kruskal": {
     "H": 93.18890458365024,
@@ -29,28 +25,24 @@
     "tie_correction": 0.999988916802128,
     "df": 2,
     "p_value": 5.811476451548733e-21,
-    "chi2_critical": 5.991464547107979,
-    "epsilon_squared": 0.4605500231497487
+    "chi2_critical": 5.991464547107979
   },
   "two_way": {
     "n": 201,
     "parameters": 6,
     "df_residual": 195,
-    "R_squared": 0.4236732307335682,
-    "adjusted_R_squared": 0.4088956212651982,
-    "SSE": 7279682947.688445,
-    "MSE": 37331707.424043305,
+    "R_squared": 0.4236732307335681,
+    "adjusted_R_squared": 0.4088956212651981,
+    "SSE": 7279682947.688447,
+    "MSE": 37331707.42404332,
     "residual_shapiro_W": 0.8764667341420409,
     "residual_shapiro_p_value": 9.323359867412544e-12,
-    "cell_levene_F": 9.50132699322594,
-    "cell_levene_p_value": 3.989163191312543e-08,
     "minimum_cell_count": 2
   },
   "verification": {
     "one_way_manual_vs_scipy": "passed",
-    "welch_manual_vs_scipy": "passed",
     "kruskal_manual_vs_scipy": "passed",
-    "two_way_nested_models_vs_type3": "passed"
+    "two_way_nested_models_vs_anova": "passed"
   },
   "packages": {
     "numpy": "2.5.3",

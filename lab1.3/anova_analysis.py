@@ -11,7 +11,6 @@ import hashlib
 import importlib.metadata
 import json
 import os
-from itertools import combinations
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
@@ -26,7 +25,6 @@ import pandas as pd
 from scipy import stats
 from statsmodels.formula.api import ols
 from statsmodels.stats.anova import anova_lm
-from statsmodels.stats.multitest import multipletests
 
 COLUMNS = (
     "symboling normalized-losses make fuel-type aspiration num-of-doors "
@@ -144,46 +142,9 @@ def one_way_analysis(clean, output):
         {"source": "total", "SS": ss_total, "df": n - 1},
     ]), output, "one_way_anova")
     eta_squared = ss_between / ss_total
-    omega_squared = (ss_between - df_between * ms_within) / (ss_total + ms_within)
-    # Уэлч: отдельная оценка дисперсии для каждой группы, без их объединения.
-    sizes = np.array([len(g) for g in groups], dtype=float)
-    means = np.array([g.mean() for g in groups])
-    variances = np.array([g.var(ddof=1) for g in groups])
-    weights = sizes / variances
-    weighted_mean = np.sum(weights * means) / weights.sum()
-    correction = np.sum((1 - weights / weights.sum()) ** 2 / (sizes - 1))
-    welch_f = np.sum(weights * (means - weighted_mean) ** 2) / (k - 1)
-    welch_f /= 1 + 2 * (k - 2) / (k**2 - 1) * correction
-    welch_df2 = (k**2 - 1) / (3 * correction)
-    welch_p = stats.f.sf(welch_f, k - 1, welch_df2)
-    scipy_welch = stats.f_oneway(*groups, equal_var=False)
-    np.testing.assert_allclose([welch_f, welch_p], scipy_welch, rtol=1e-11)
-    levene_f, levene_p = stats.levene(*groups, center="median")
-    save_csv(pd.DataFrame([{"test": "Levene_median", "statistic": levene_f,
-                           "df1": k - 1, "df2": n - k, "p_value": levene_p}]),
-             output, "variance_homogeneity")
-    save_csv(pd.DataFrame([{"F": welch_f, "df1": k - 1, "df2": welch_df2,
-                           "p_value": welch_p,
-                           "F_critical": stats.f.ppf(1 - ALPHA, k - 1, welch_df2)}]),
-             output, "welch_anova")
-    # Уточнение различающихся пар: двусторонние t-тесты Уэлча + поправка Холма.
-    pairwise = []
-    for i, j in combinations(range(k), 2):
-        t, pair_p = stats.ttest_ind(groups[i], groups[j], equal_var=False)
-        a, b = variances[i] / sizes[i], variances[j] / sizes[j]
-        df = (a + b) ** 2 / (a**2 / (sizes[i] - 1) + b**2 / (sizes[j] - 1))
-        pairwise.append({"group1": DRIVE_LEVELS[i], "group2": DRIVE_LEVELS[j],
-                         "mean_difference": means[i] - means[j], "t": t,
-                         "df": df, "p_value": pair_p})
-    pairs = pd.DataFrame(pairwise)
-    pairs["reject_holm"], pairs["p_holm"], _, _ = multipletests(pairs["p_value"], alpha=ALPHA, method="holm")
-    save_csv(pairs, output, "pairwise_welch_holm")
     return {"F": float(f), "df1": df_between, "df2": df_within, "p_value": float(p),
             "F_critical": float(f_critical), "eta_squared": float(eta_squared),
-            "omega_squared": float(omega_squared), "welch_F": float(welch_f),
-            "welch_df2": float(welch_df2), "welch_p_value": float(welch_p),
-            "levene_F": float(levene_f), "levene_p_value": float(levene_p),
-            "variance_ratio": float(variances.max() / variances.min())}
+            "Q1": float(ss_between), "Q2": float(ss_within), "Q_total": ss_total}
 
 
 def kruskal_analysis(clean, output):
@@ -209,20 +170,8 @@ def kruskal_analysis(clean, output):
     save_csv(clean.assign(price_rank=ranks), output, "ranked_data")
     result = {"H": float(h), "H_before_tie_correction": float(raw_h),
               "tie_correction": float(tie_correction), "df": k - 1, "p_value": float(p),
-              "chi2_critical": float(stats.chi2.ppf(1 - ALPHA, k - 1)),
-              "epsilon_squared": float((h - k + 1) / (n - k))}
+              "chi2_critical": float(stats.chi2.ppf(1 - ALPHA, k - 1))}
     save_csv(pd.DataFrame([result]), output, "kruskal_wallis")
-    # Критерий Данна использует общие ранги и поправку на совпадающие цены.
-    rank_variance = n * (n + 1) / 12 - tie_sum / (12 * (n - 1))
-    rows = []
-    for i, j in combinations(range(k), 2):
-        a, b = rank_rows[i], rank_rows[j]
-        z = (a["mean_rank"] - b["mean_rank"]) / np.sqrt(rank_variance * (1 / a["count"] + 1 / b["count"]))
-        rows.append({"group1": a["group"], "group2": b["group"], "z": z,
-                     "p_value": 2 * stats.norm.sf(abs(z))})
-    pairs = pd.DataFrame(rows)
-    pairs["reject_holm"], pairs["p_holm"], _, _ = multipletests(pairs["p_value"], alpha=ALPHA, method="holm")
-    save_csv(pairs, output, "pairwise_dunn_holm")
     return result
 
 
@@ -233,67 +182,69 @@ def two_way_analysis(clean, output):
         raise ValueError("Для модели с взаимодействием требуется не менее двух наблюдений в каждой ячейке")
     save_csv(counts, output, "two_way_cell_counts", index=True)
     cells = []
-    cell_groups = []
     for drive in DRIVE_LEVELS:
         for aspiration in ASPIRATION_LEVELS:
             values = clean.loc[(clean["drive-wheels"] == drive) & (clean["aspiration"] == aspiration), "price"]
-            cell_groups.append(values.to_numpy())
             w, p = stats.shapiro(values) if len(values) >= 3 else (np.nan, np.nan)
             cells.append({"drive": drive, "aspiration": aspiration, **price_summary(values),
                           "shapiro_W": w, "shapiro_p_value": p})
     cell_table = pd.DataFrame(cells)
     save_csv(cell_table, output, "two_way_cell_statistics")
     model_data = clean.rename(columns={"drive-wheels": "drive"})
-    model = ols("price ~ C(drive, Sum) * C(aspiration, Sum)", data=model_data).fit()
+    model = ols("price ~ C(drive) * C(aspiration)", data=model_data).fit()
     if np.linalg.matrix_rank(model.model.exog) != model.model.exog.shape[1]:
         raise ValueError("Матрица двухфакторной модели имеет неполный ранг")
-    terms = {"C(drive, Sum)": "drive", "C(aspiration, Sum)": "aspiration",
-             "C(drive, Sum):C(aspiration, Sum)": "interaction", "Residual": "residual"}
-    classic = anova_lm(model, typ=3)
-    robust = anova_lm(model, typ=3, robust="hc3")
+    terms = {"C(drive)": "drive", "C(aspiration)": "aspiration",
+             "C(drive):C(aspiration)": "interaction", "Residual": "residual"}
+    classic = anova_lm(model)
     classic = classic.loc[list(terms)].rename(index=terms).rename_axis("effect").reset_index()
-    classic = classic.rename(columns={"sum_sq": "SS_partial", "PR(>F)": "p_value"})
-    classic["MS"] = classic["SS_partial"] / classic["df"]
+    classic = classic.rename(columns={"sum_sq": "SS", "PR(>F)": "p_value"})
+    classic["MS"] = classic["SS"] / classic["df"]
     classic["F_critical"] = [stats.f.ppf(1 - ALPHA, df, model.df_resid) if effect != "residual" else np.nan
                              for effect, df in zip(classic["effect"], classic["df"])]
-    # При HC3 сохраняем только F и p: robust sum_sq не является разложением разброса.
-    robust = robust.loc[list(terms)[:-1], ["df", "F", "PR(>F)"]].rename(index=terms)
-    robust = robust.rename_axis("effect").reset_index().rename(columns={"PR(>F)": "p_value"})
-    robust["df_residual"] = model.df_resid
-    save_csv(classic, output, "two_way_anova_type3")
-    save_csv(robust, output, "two_way_anova_hc3")
+    total_ss = float(np.sum((model.model.endog - model.model.endog.mean()) ** 2))
+    np.testing.assert_allclose(classic["SS"].sum(), total_ss, rtol=1e-12)
+    save_csv(classic, output, "two_way_anova")
     coefficients = pd.DataFrame({"coefficient": model.params, "standard_error": model.bse,
                                  "t": model.tvalues, "p_value": model.pvalues})
     save_csv(coefficients, output, "two_way_coefficients", index=True)
     save_csv(clean.assign(fitted=model.fittedvalues.to_numpy(), residual=model.resid.to_numpy()),
              output, "two_way_residuals")
     w, normal_p = stats.shapiro(model.resid)
-    lev_f, lev_p = stats.levene(*cell_groups, center="median")
     metrics = {"n": len(clean), "parameters": len(model.params), "df_residual": int(model.df_resid),
                "R_squared": float(model.rsquared), "adjusted_R_squared": float(model.rsquared_adj),
                "SSE": float(model.ssr), "MSE": float(model.mse_resid),
                "residual_shapiro_W": float(w), "residual_shapiro_p_value": float(normal_p),
-               "cell_levene_F": float(lev_f), "cell_levene_p_value": float(lev_p),
                "minimum_cell_count": int(counts.to_numpy().min())}
     save_csv(pd.DataFrame([metrics]), output, "two_way_metrics")
-    # Независимая сверка частных F: суммы квадратов вложенных моделей NumPy.
+    # Независимая сверка: последовательно добавляем привод, наддув, взаимодействие.
     x, y = model.model.exog, model.model.endog
+    previous_ss = total_ss
+    previous_rank = 1
+    columns = [0]
     checks = []
     for term, effect in list(terms.items())[:-1]:
         indices = [i for i, name in enumerate(model.model.exog_names)
                    if (":" in name if effect == "interaction"
                        else term in name and ":" not in name)]
-        reduced = np.delete(x, indices, axis=1)
-        errors = y - reduced @ np.linalg.lstsq(reduced, y, rcond=None)[0]
-        nested_f = ((errors @ errors - model.ssr) / len(indices)) / model.mse_resid
+        columns.extend(indices)
+        matrix = x[:, columns]
+        errors = y - matrix @ np.linalg.lstsq(matrix, y, rcond=None)[0]
+        current_ss = float(errors @ errors)
+        current_rank = int(np.linalg.matrix_rank(matrix))
+        effect_df = current_rank - previous_rank
+        effect_ss = previous_ss - current_ss
+        nested_f = (effect_ss / effect_df) / model.mse_resid
         table_f = classic.loc[classic["effect"] == effect, "F"].iloc[0]
         np.testing.assert_allclose(nested_f, table_f, rtol=1e-9)
-        checks.append({"effect": effect, "nested_F": float(nested_f), "type3_F": float(table_f)})
+        checks.append({"effect": effect, "SS_numpy": effect_ss,
+                       "F_numpy": float(nested_f), "F_anova": float(table_f)})
+        previous_ss, previous_rank = current_ss, current_rank
     save_csv(pd.DataFrame(checks), output, "two_way_validation")
     return metrics, cell_table, model
 
 
-def create_plots(clean, cells, model, output):
+def create_plots(clean, cells, output):
     plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 10,
                          "axes.spines.top": False, "axes.spines.right": False})
     fig, axes = plt.subplots(2, 2, figsize=(10.2, 7.2), layout="constrained")
@@ -352,14 +303,6 @@ def create_plots(clean, cells, model, output):
     axis.grid(alpha=0.18)
     fig.savefig(output / "two_way_interaction.png", dpi=180)
     plt.close(fig)
-    fig, axes = plt.subplots(1, 2, figsize=(10.2, 3.8), layout="constrained")
-    axes[0].scatter(model.fittedvalues, model.resid, alpha=0.6, color="#3576a8")
-    axes[0].axhline(0, color="black", linewidth=1)
-    axes[0].set(title="Остатки двухфакторной модели", xlabel="Предсказанная цена", ylabel="Остаток")
-    stats.probplot(model.resid, dist="norm", plot=axes[1])
-    axes[1].set(title="Q–Q остатков", xlabel="Теоретические квантили", ylabel="Остаток")
-    fig.savefig(output / "two_way_diagnostics.png", dpi=180)
-    plt.close(fig)
 
 
 def run_analysis(data_path=BASE.parent / "lab1/data/imports-85.data", output=BASE / "results"):
@@ -369,8 +312,8 @@ def run_analysis(data_path=BASE.parent / "lab1/data/imports-85.data", output=BAS
     descriptive_analysis(raw, clean, excluded, output)
     one_way = one_way_analysis(clean, output)
     kruskal = kruskal_analysis(clean, output)
-    two_way, cells, model = two_way_analysis(clean, output)
-    create_plots(clean, cells, model, output)
+    two_way, cells, _ = two_way_analysis(clean, output)
+    create_plots(clean, cells, output)
     summary = {"dataset": "1985 Auto Imports (Automobile)",
                "data_sha256": hashlib.sha256(data_path.read_bytes()).hexdigest(),
                "alpha": ALPHA, "total_rows": len(raw), "analysis_rows": len(clean),
@@ -378,9 +321,8 @@ def run_analysis(data_path=BASE.parent / "lab1/data/imports-85.data", output=BAS
                "factor1": "drive-wheels", "factor2": "aspiration", "one_way": one_way,
                "kruskal": kruskal, "two_way": two_way,
                "verification": {"one_way_manual_vs_scipy": "passed",
-                                "welch_manual_vs_scipy": "passed",
                                 "kruskal_manual_vs_scipy": "passed",
-                                "two_way_nested_models_vs_type3": "passed"},
+                                "two_way_nested_models_vs_anova": "passed"},
                "packages": {name: importlib.metadata.version(name)
                             for name in ["numpy", "pandas", "scipy", "matplotlib", "statsmodels", "python-docx"]}}
     (output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -1,0 +1,32 @@
+{
+  "n": 201,
+  "excluded_rows": [
+    10,
+    45,
+    46,
+    130
+  ],
+  "data_sha256": "125db8bd36a84801f7223faf54071d15f85f26c13a9a7aee63375ac46098fb7f",
+  "models": {
+    "welch": {
+      "F": 44.71976320496254,
+      "df1": 2.0,
+      "df2": 19.355931929540976,
+      "p_value": 5.5397893405429355e-08
+    },
+    "brown_forsythe": {
+      "F": 77.0594435742826,
+      "df1": 1.3737912623875388,
+      "df2": 86.06629759073287,
+      "p_value": 2.8616245526511796e-16
+    }
+  },
+  "levene": {
+    "F": 18.48874973235117,
+    "p_value": 4.3476274615481516e-08
+  },
+  "validation": {
+    "welch_checked_with_statsmodels_and_scipy": true,
+    "brown_forsythe_mehrotra_checked_with_statsmodels": true
+  }
+}
