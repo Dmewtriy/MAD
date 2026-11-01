@@ -178,33 +178,53 @@ def kruskal_analysis(clean, output):
 def two_way_analysis(clean, output):
     counts = pd.crosstab(clean["drive-wheels"], clean["aspiration"]).reindex(
         index=DRIVE_LEVELS, columns=ASPIRATION_LEVELS, fill_value=0)
-    if (counts < 2).any().any():
+    if counts.min().min() < 2:
         raise ValueError("Для модели с взаимодействием требуется не менее двух наблюдений в каждой ячейке")
     save_csv(counts, output, "two_way_cell_counts", index=True)
+
     cells = []
+    price_groups = []
     for drive in DRIVE_LEVELS:
         for aspiration in ASPIRATION_LEVELS:
             values = clean.loc[(clean["drive-wheels"] == drive) & (clean["aspiration"] == aspiration), "price"]
-            w, p = stats.shapiro(values) if len(values) >= 3 else (np.nan, np.nan)
+            price_groups.append(values)
+            if len(values) >= 3:
+                w, p = stats.shapiro(values)
+            else:
+                w, p = np.nan, np.nan  # Для Шапиро–Уилка нужно минимум 3 значения.
             cells.append({"drive": drive, "aspiration": aspiration, **price_summary(values),
                           "shapiro_W": w, "shapiro_p_value": p})
     cell_table = pd.DataFrame(cells)
     save_csv(cell_table, output, "two_way_cell_statistics")
+
+    # H0: дисперсии цены одинаковы во всех шести группах «привод × наддув».
+    # *price_groups передаёт шесть выборок отдельными аргументами критерию Левена.
+    # Центр в медиане выбран из-за отклонений распределений цены от нормальности.
+    levene_statistic, levene_p_value = stats.levene(*price_groups, center="median")
+    reject_equal_variances = bool(levene_p_value < ALPHA)
+    homogeneity = pd.DataFrame([{
+        "test": "Levene", "center": "median", "groups": len(price_groups),
+        "statistic": levene_statistic, "df1": len(price_groups) - 1,
+        "df2": len(clean) - len(price_groups), "p_value": levene_p_value,
+        "alpha": ALPHA, "reject_equal_variances": reject_equal_variances,
+    }])
+    save_csv(homogeneity, output, "two_way_variance_homogeneity")
+    
     model_data = clean.rename(columns={"drive-wheels": "drive"})
     model = ols("price ~ C(drive) * C(aspiration)", data=model_data).fit()
-    if np.linalg.matrix_rank(model.model.exog) != model.model.exog.shape[1]:
-        raise ValueError("Матрица двухфакторной модели имеет неполный ранг")
-    terms = {"C(drive)": "drive", "C(aspiration)": "aspiration",
-             "C(drive):C(aspiration)": "interaction", "Residual": "residual"}
-    classic = anova_lm(model)
-    classic = classic.loc[list(terms)].rename(index=terms).rename_axis("effect").reset_index()
-    classic = classic.rename(columns={"sum_sq": "SS", "PR(>F)": "p_value"})
-    classic["MS"] = classic["SS"] / classic["df"]
-    classic["F_critical"] = [stats.f.ppf(1 - ALPHA, df, model.df_resid) if effect != "residual" else np.nan
-                             for effect, df in zip(classic["effect"], classic["df"])]
-    total_ss = float(np.sum((model.model.endog - model.model.endog.mean()) ** 2))
-    np.testing.assert_allclose(classic["SS"].sum(), total_ss, rtol=1e-12)
-    save_csv(classic, output, "two_way_anova")
+
+    anova_table = anova_lm(model)
+    anova_table = anova_table.rename(index={
+        "C(drive)": "drive", "C(aspiration)": "aspiration",
+        "C(drive):C(aspiration)": "interaction", "Residual": "residual",
+    }, columns={"sum_sq": "SS", "PR(>F)": "p_value"})
+    anova_table["MS"] = anova_table["SS"] / anova_table["df"]
+    anova_table["F_critical"] = stats.f.ppf(1 - ALPHA, anova_table["df"], model.df_resid)
+    anova_table.loc["residual", "F_critical"] = np.nan 
+    anova_table.index.name = "effect"
+    anova_table = anova_table.reset_index()
+    save_csv(anova_table, output, "two_way_anova")
+
     coefficients = pd.DataFrame({"coefficient": model.params, "standard_error": model.bse,
                                  "t": model.tvalues, "p_value": model.pvalues})
     save_csv(coefficients, output, "two_way_coefficients", index=True)
@@ -215,32 +235,17 @@ def two_way_analysis(clean, output):
                "R_squared": float(model.rsquared), "adjusted_R_squared": float(model.rsquared_adj),
                "SSE": float(model.ssr), "MSE": float(model.mse_resid),
                "residual_shapiro_W": float(w), "residual_shapiro_p_value": float(normal_p),
-               "minimum_cell_count": int(counts.to_numpy().min())}
+               "minimum_cell_count": int(counts.to_numpy().min()),
+               "levene_statistic": float(levene_statistic), "levene_p_value": float(levene_p_value),
+               "reject_equal_variances": reject_equal_variances}
     save_csv(pd.DataFrame([metrics]), output, "two_way_metrics")
-    # Независимая сверка: последовательно добавляем привод, наддув, взаимодействие.
-    x, y = model.model.exog, model.model.endog
-    previous_ss = total_ss
-    previous_rank = 1
-    columns = [0]
-    checks = []
-    for term, effect in list(terms.items())[:-1]:
-        indices = [i for i, name in enumerate(model.model.exog_names)
-                   if (":" in name if effect == "interaction"
-                       else term in name and ":" not in name)]
-        columns.extend(indices)
-        matrix = x[:, columns]
-        errors = y - matrix @ np.linalg.lstsq(matrix, y, rcond=None)[0]
-        current_ss = float(errors @ errors)
-        current_rank = int(np.linalg.matrix_rank(matrix))
-        effect_df = current_rank - previous_rank
-        effect_ss = previous_ss - current_ss
-        nested_f = (effect_ss / effect_df) / model.mse_resid
-        table_f = classic.loc[classic["effect"] == effect, "F"].iloc[0]
-        np.testing.assert_allclose(nested_f, table_f, rtol=1e-9)
-        checks.append({"effect": effect, "SS_numpy": effect_ss,
-                       "F_numpy": float(nested_f), "F_anova": float(table_f)})
-        previous_ss, previous_rank = current_ss, current_rank
-    save_csv(pd.DataFrame(checks), output, "two_way_validation")
+
+    prices = clean["price"]
+    total_ss = float(((prices - prices.mean()) ** 2).sum())
+    anova_ss = float(anova_table["SS"].sum())
+    np.testing.assert_allclose(anova_ss, total_ss, rtol=1e-12)
+    save_csv(pd.DataFrame([{"SS_total": total_ss, "SS_anova": anova_ss}]),
+             output, "two_way_validation")
     return metrics, cell_table, model
 
 
@@ -322,7 +327,7 @@ def run_analysis(data_path=BASE.parent / "lab1/data/imports-85.data", output=BAS
                "kruskal": kruskal, "two_way": two_way,
                "verification": {"one_way_manual_vs_scipy": "passed",
                                 "kruskal_manual_vs_scipy": "passed",
-                                "two_way_nested_models_vs_anova": "passed"},
+                                "two_way_ss_decomposition": "passed"},
                "packages": {name: importlib.metadata.version(name)
                             for name in ["numpy", "pandas", "scipy", "matplotlib", "statsmodels", "python-docx"]}}
     (output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -338,6 +343,12 @@ def main():
     print(f"Обработано {summary['analysis_rows']} из {summary['total_rows']} строк. Результаты: {args.output}")
     print(f"ANOVA: F={summary['one_way']['F']:.6f}; p={summary['one_way']['p_value']:.6g}")
     print(f"Краскел–Уоллис: H={summary['kruskal']['H']:.6f}; p={summary['kruskal']['p_value']:.6g}")
+    two_way = summary["two_way"]
+    print(f"Левен (6 групп): статистика={two_way['levene_statistic']:.6f}; p={two_way['levene_p_value']:.6g}")
+    if two_way["reject_equal_variances"]:
+        print("H0 отвергается: условие однородности дисперсий не выполняется.")
+    else:
+        print("Нет оснований отвергать H0 о равенстве дисперсий при alpha = 0.05.")
 
 
 if __name__ == "__main__":

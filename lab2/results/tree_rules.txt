@@ -1,0 +1,10 @@
+|--- Major_Axis_Length <= 191.817
+|   |--- Major_Axis_Length <= 181.236
+|   |   |--- class: 0
+|   |--- Major_Axis_Length >  181.236
+|   |   |--- class: 0
+|--- Major_Axis_Length >  191.817
+|   |--- Perimeter <= 467.825
+|   |   |--- class: 1
+|   |--- Perimeter >  467.825
+|   |   |--- class: 1
