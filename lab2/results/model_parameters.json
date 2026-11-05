@@ -1,0 +1,18 @@
+{
+  "Дерево": {
+    "max_depth": 2,
+    "min_samples_leaf": 1,
+    "node_count": 7,
+    "n_leaves": 4,
+    "root_gini": 0.489580534716625
+  },
+  "SVM": {
+    "kernel": "linear",
+    "C": 1,
+    "n_support": [
+      278,
+      278
+    ],
+    "n_support_total": 556
+  }
+}
