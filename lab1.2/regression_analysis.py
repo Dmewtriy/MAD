@@ -16,7 +16,6 @@ import pandas as pd
 from scipy import stats
 from scipy.special import gammaln, xlogy
 
-
 COLUMNS = (
     "symboling normalized-losses make fuel-type aspiration num-of-doors "
     "body-style drive-wheels engine-location wheel-base length width height "
@@ -111,7 +110,12 @@ def ols_model(data, nonlinear=False):
         "residual_variance": residuals.var(ddof=1),
     }
     diagnostics = pd.DataFrame(
-        {"observed": response, "fitted": fitted, "residual": residuals, "standardized_residual": standardized}
+        {
+            "observed": response,
+            "fitted": fitted,
+            "residual": residuals,
+            "standardized_residual": standardized,
+        }
     )
     return coefficient_table, metrics, diagnostics
 
@@ -123,6 +127,10 @@ def poisson_deviance(response, fitted):
 
 def poisson_model(data, tolerance=1e-10, max_iterations=200):
     response = (data["symboling"] + 2).to_numpy(dtype=float)
+    symb = response
+    mean = symb.mean()
+    disp = symb.var(ddof=1)
+    print(f"сверхдисперсия после сдвига={disp / mean}")
     matrix, names = design_matrix(data)
     coefficients = np.zeros(matrix.shape[1])
     coefficients[0] = np.log(response.mean())
@@ -133,7 +141,9 @@ def poisson_model(data, tolerance=1e-10, max_iterations=200):
         adjusted = linear_predictor + (response - fitted) / fitted
         weighted_matrix = matrix * np.sqrt(fitted)[:, None]
         weighted_response = adjusted * np.sqrt(fitted)
-        updated = np.linalg.lstsq(weighted_matrix, weighted_response, rcond=None)[0]
+        updated = np.linalg.lstsq(
+            weighted_matrix, weighted_response, rcond=None
+        )[0]
         if np.max(np.abs(updated - coefficients)) < tolerance:
             coefficients = updated
             converged = True
@@ -144,9 +154,15 @@ def poisson_model(data, tolerance=1e-10, max_iterations=200):
     standard_errors = np.sqrt(np.diag(covariance))
     z_values = coefficients / standard_errors
     p_values = 2 * stats.norm.sf(np.abs(z_values))
-    log_likelihood = float(np.sum(response * np.log(fitted) - fitted - gammaln(response + 1)))
+    log_likelihood = float(
+        np.sum(response * np.log(fitted) - fitted - gammaln(response + 1))
+    )
     null_mean = response.mean()
-    null_log_likelihood = float(np.sum(response * np.log(null_mean) - null_mean - gammaln(response + 1)))
+    null_log_likelihood = float(
+        np.sum(
+            response * np.log(null_mean) - null_mean - gammaln(response + 1)
+        )
+    )
     likelihood_ratio = 2 * (log_likelihood - null_log_likelihood)
     model_df = matrix.shape[1] - 1
     model_p_value = stats.chi2.sf(likelihood_ratio, model_df)
@@ -194,11 +210,15 @@ def save_model(name, coefficients, metrics, diagnostics, output):
     save_csv(coefficients, output, f"{name}_coefficients")
     save_csv(pd.DataFrame([metrics], index=[name]), output, f"{name}_metrics")
     save_csv(diagnostics, output, f"{name}_diagnostics", index=False)
-    fitted_column = "fitted_shifted" if "fitted_shifted" in diagnostics else "fitted"
+    fitted_column = (
+        "fitted_shifted" if "fitted_shifted" in diagnostics else "fitted"
+    )
     groups = pd.qcut(diagnostics[fitted_column], q=4, duplicates="drop")
-    residual_groups = diagnostics.assign(fitted_group=groups).groupby(
-        "fitted_group", observed=True
-    )["residual"].agg(["count", "mean", "var"])
+    residual_groups = (
+        diagnostics.assign(fitted_group=groups)
+        .groupby("fitted_group", observed=True)["residual"]
+        .agg(["count", "mean", "var"])
+    )
     residual_groups.index = residual_groups.index.astype(str)
     save_csv(residual_groups, output, f"{name}_residual_groups")
 
@@ -206,13 +226,25 @@ def save_model(name, coefficients, metrics, diagnostics, output):
 def plot_model_diagnostics(models, output):
     for name, title, diagnostics in models:
         fig, axes = plt.subplots(1, 2, figsize=(12, 4.4), layout="constrained")
-        axes[0].scatter(diagnostics["fitted"], diagnostics["residual"], alpha=0.7)
+        axes[0].scatter(
+            diagnostics["fitted"], diagnostics["residual"], alpha=0.7
+        )
         axes[0].axhline(0, color="black", linewidth=1)
-        axes[0].set(title=f"{title}: остатки", xlabel="Предсказанные значения", ylabel="Остаток")
+        axes[0].set(
+            title=f"{title}: остатки",
+            xlabel="Предсказанные значения",
+            ylabel="Остаток",
+        )
         axes[0].grid(alpha=0.2)
         bins = int(np.ceil(1 + np.log2(len(diagnostics))))
-        axes[1].hist(diagnostics["standardized_residual"], bins=bins, edgecolor="white")
-        axes[1].set(title=f"{title}: стандартизированные остатки", xlabel="Стандартизированный остаток", ylabel="Частота")
+        axes[1].hist(
+            diagnostics["standardized_residual"], bins=bins, edgecolor="white"
+        )
+        axes[1].set(
+            title=f"{title}: стандартизированные остатки",
+            xlabel="Стандартизированный остаток",
+            ylabel="Частота",
+        )
         fig.savefig(output / f"{name}_residuals.png", dpi=170)
         plt.close(fig)
 
@@ -221,37 +253,83 @@ def descriptive_analysis(data, output):
     quality = pd.DataFrame(
         {
             "type": ["ordinal", "nominal", "quantitative"],
-            "count": data.count(), "missing": data.isna().sum(), "unique": data.nunique(),
+            "count": data.count(),
+            "missing": data.isna().sum(),
+            "unique": data.nunique(),
         },
         index=SELECTED,
     )
     weight = data["curb-weight"]
     descriptive = pd.DataFrame(
         {
-            "count": [len(weight)], "mean": [weight.mean()], "median": [weight.median()],
-            "mode": [", ".join(map(str, weight.mode()))], "minimum": [weight.min()],
-            "maximum": [weight.max()], "range": [weight.max() - weight.min()],
-            "variance": [weight.var(ddof=1)], "standard_deviation": [weight.std(ddof=1)],
+            "count": [len(weight)],
+            "mean": [weight.mean()],
+            "median": [weight.median()],
+            "mode": [", ".join(map(str, weight.mode()))],
+            "minimum": [weight.min()],
+            "maximum": [weight.max()],
+            "range": [weight.max() - weight.min()],
+            "variance": [weight.var(ddof=1)],
+            "standard_deviation": [weight.std(ddof=1)],
         },
         index=["curb-weight"],
     )
     save_csv(quality, output, "data_quality")
     save_csv(descriptive, output, "descriptive_statistics")
-    for column, levels in (("symboling", range(-3, 4)), ("drive-wheels", DRIVE_LEVELS)):
+    for column, levels in (
+        ("symboling", range(-3, 4)),
+        ("drive-wheels", DRIVE_LEVELS),
+    ):
         counts = data[column].value_counts().reindex(levels, fill_value=0)
-        save_csv(pd.DataFrame({"count": counts, "percent": counts / len(data) * 100}), output, f"frequencies_{column}")
+        save_csv(
+            pd.DataFrame(
+                {
+                    "count": counts,
+                    "percent": counts / len(data) * 100,
+                }
+            ),
+            output,
+            f"frequencies_{column}",
+        )
+
+    symb = data["symboling"]
+    mean = symb.mean()
+    disp = symb.var(ddof=1)
+    print(f"сверхдисперсия до сдвига={disp / mean}")
 
     intervals = int(np.ceil(1 + np.log2(len(data))))
     edges = np.linspace(weight.min(), weight.max(), intervals + 1)
     counts, _ = np.histogram(weight, bins=edges)
-    save_csv(pd.DataFrame({"interval": range(1, intervals + 1), "left": edges[:-1], "right": edges[1:], "count": counts}), output, "histogram_bins", index=False)
+    save_csv(
+        pd.DataFrame(
+            {
+                "interval": range(1, intervals + 1),
+                "left": edges[:-1],
+                "right": edges[1:],
+                "count": counts,
+            }
+        ),
+        output,
+        "histogram_bins",
+        index=False,
+    )
     fig, axes = plt.subplots(1, 3, figsize=(15, 4.4), layout="constrained")
     axes[0].hist(weight, bins=edges, edgecolor="white")
-    axes[0].set(title=f"curb-weight: k={intervals}", xlabel="curb-weight", ylabel="Частота")
-    symbol_counts = data["symboling"].value_counts().reindex(range(-3, 4), fill_value=0)
-    axes[1].bar(symbol_counts.index.astype(str), symbol_counts / len(data) * 100)
+    axes[0].set(
+        title=f"curb-weight: k={intervals}",
+        xlabel="curb-weight",
+        ylabel="Частота",
+    )
+    symbol_counts = (
+        data["symboling"].value_counts().reindex(range(-3, 4), fill_value=0)
+    )
+    axes[1].bar(
+        symbol_counts.index.astype(str), symbol_counts / len(data) * 100
+    )
     axes[1].set(title="symboling", xlabel="Категория", ylabel="Доля, %")
-    drive_counts = data["drive-wheels"].value_counts().reindex(DRIVE_LEVELS, fill_value=0)
+    drive_counts = (
+        data["drive-wheels"].value_counts().reindex(DRIVE_LEVELS, fill_value=0)
+    )
     axes[2].bar(drive_counts.index, drive_counts / len(data) * 100)
     axes[2].set(title="drive-wheels", xlabel="Тип привода", ylabel="Доля, %")
     fig.savefig(output / "selected_variables_histograms.png", dpi=170)
@@ -272,26 +350,32 @@ def run_analysis(data_path, output):
     comparison = pd.DataFrame(
         [
             {
-                "model": "linear", "quality_measure": "R-squared",
+                "model": "linear",
+                "quality_measure": "R-squared",
                 "quality_value": linear[1]["r_squared"],
                 "adjusted_r_squared": linear[1]["adjusted_r_squared"],
-                "rmse": linear[1]["rmse"], "aic": np.nan,
+                "rmse": linear[1]["rmse"],
+                "aic": np.nan,
                 "model_p_value": linear[1]["model_p_value"],
                 "significant_0.05": linear[1]["model_p_value"] < ALPHA,
             },
             {
-                "model": "nonlinear", "quality_measure": "R-squared",
+                "model": "nonlinear",
+                "quality_measure": "R-squared",
                 "quality_value": nonlinear[1]["r_squared"],
                 "adjusted_r_squared": nonlinear[1]["adjusted_r_squared"],
-                "rmse": nonlinear[1]["rmse"], "aic": np.nan,
+                "rmse": nonlinear[1]["rmse"],
+                "aic": np.nan,
                 "model_p_value": nonlinear[1]["model_p_value"],
                 "significant_0.05": nonlinear[1]["model_p_value"] < ALPHA,
             },
             {
-                "model": "poisson", "quality_measure": "McFadden pseudo-R-squared",
+                "model": "poisson",
+                "quality_measure": "McFadden pseudo-R-squared",
                 "quality_value": poisson[1]["mcfadden_pseudo_r_squared"],
                 "adjusted_r_squared": np.nan,
-                "rmse": poisson[1]["rmse_shifted_scale"], "aic": poisson[1]["aic"],
+                "rmse": poisson[1]["rmse_shifted_scale"],
+                "aic": poisson[1]["aic"],
                 "model_p_value": poisson[1]["model_p_value"],
                 "significant_0.05": poisson[1]["model_p_value"] < ALPHA,
             },
@@ -311,7 +395,9 @@ def run_analysis(data_path, output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data", type=Path, default=BASE.parent / "lab1/data/imports-85.data")
+    parser.add_argument(
+        "--data", type=Path, default=BASE.parent / "lab1/data/imports-85.data"
+    )
     parser.add_argument("--output", type=Path, default=BASE / "results")
     args = parser.parse_args()
     print(f"Таблицы и графики: {run_analysis(args.data, args.output)}")
