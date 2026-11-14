@@ -37,12 +37,15 @@
     "MSE": 37331707.42404332,
     "residual_shapiro_W": 0.8764667341420409,
     "residual_shapiro_p_value": 9.323359867412544e-12,
-    "minimum_cell_count": 2
+    "minimum_cell_count": 2,
+    "levene_statistic": 9.50132699322594,
+    "levene_p_value": 3.989163191312543e-08,
+    "reject_equal_variances": true
   },
   "verification": {
     "one_way_manual_vs_scipy": "passed",
     "kruskal_manual_vs_scipy": "passed",
-    "two_way_nested_models_vs_anova": "passed"
+    "two_way_ss_decomposition": "passed"
   },
   "packages": {
     "numpy": "2.5.3",

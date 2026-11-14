@@ -1,0 +1,2 @@
+﻿test,center,groups,statistic,df1,df2,p_value,alpha,reject_equal_variances
+Levene,median,6,9.50132699322594,5,195,3.989163191312543e-08,0.05,True
