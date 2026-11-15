@@ -5,39 +5,51 @@
   "validation_sample_size": 3000,
   "sample_seed": 20261114,
   "distance": "normalized Hamming; Gower for complete nominal data with equal weights",
-  "selection_rule": "maximum selection silhouette among valid partitions; no target used",
+  "selection_rule": "CLOPE: maximum Profit over three orders at each r; then maximum selection silhouette; no target used",
+  "quality_evaluation": "exact full-data Hamming distances, modal compactness and silhouette via category counts",
   "selected": {
     "CLOPE": {
       "parameter": 1.1,
       "r": 1.1,
-      "seed": 42,
-      "fit_seconds": 0.9766728840004362,
-      "iterations": 2,
-      "objective": 5826.816857075312,
+      "seed": 43,
+      "fit_seconds": 2.613055477999751,
+      "iterations": 1,
+      "objective": 6038.596504266887,
       "clusters": [
         {
           "cluster": 1,
-          "n": 41499,
-          "S": 663984,
-          "W": 69,
-          "H": 9622.95652173913,
-          "profit_contribution": 5783.851488370081
+          "n": 41205,
+          "S": 659280,
+          "W": 66,
+          "H": 9989.09090909091,
+          "profit_contribution": 5987.939137210914
         },
         {
           "cluster": 2,
-          "n": 3661,
-          "S": 58576,
-          "W": 72,
-          "H": 813.5555555555555,
-          "profit_contribution": 42.95459031556228
+          "n": 4006,
+          "S": 64096,
+          "W": 73,
+          "H": 878.027397260274,
+          "profit_contribution": 50.657367055972855
+        }
+      ],
+      "n_init": 3,
+      "start_seed": 42,
+      "initializations": [
+        {
+          "seed": 42,
+          "n_clusters": 3,
+          "objective": 5826.816857075312
         },
         {
-          "cluster": 3,
-          "n": 51,
-          "S": 816,
-          "W": 57,
-          "H": 14.31578947368421,
-          "profit_contribution": 0.010778389669434674
+          "seed": 43,
+          "n_clusters": 2,
+          "objective": 6038.596504266887
+        },
+        {
+          "seed": 44,
+          "n_clusters": 2,
+          "objective": 5957.588057009621
         }
       ]
     },
@@ -47,7 +59,7 @@
       "seed": 42,
       "n_init": 3,
       "init": "Huang",
-      "fit_seconds": 8.700927783000225,
+      "fit_seconds": 9.598940659999698,
       "iterations": 3,
       "objective": 278446.0,
       "modes_encoded": {
@@ -90,5 +102,5 @@
       }
     }
   },
-  "cross_method_ARI": 0.005826325865510308
+  "cross_method_ARI": 0.02493461494151081
 }
