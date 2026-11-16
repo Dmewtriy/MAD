@@ -1,10 +1,79 @@
 |--- Major_Axis_Length <= 191.817
 |   |--- Major_Axis_Length <= 181.236
-|   |   |--- class: 0
+|   |   |--- Major_Axis_Length <= 176.597
+|   |   |   |--- Perimeter <= 442.858
+|   |   |   |   |--- Eccentricity <= 0.880
+|   |   |   |   |   |--- class: 0
+|   |   |   |   |--- Eccentricity >  0.880
+|   |   |   |   |   |--- class: 0
+|   |   |   |--- Perimeter >  442.858
+|   |   |   |   |--- class: 0
+|   |   |--- Major_Axis_Length >  176.597
+|   |   |   |--- Extent <= 0.597
+|   |   |   |   |--- Extent <= 0.595
+|   |   |   |   |   |--- class: 0
+|   |   |   |   |--- Extent >  0.595
+|   |   |   |   |   |--- class: 0
+|   |   |   |--- Extent >  0.597
+|   |   |   |   |--- Extent <= 0.734
+|   |   |   |   |   |--- class: 0
+|   |   |   |   |--- Extent >  0.734
+|   |   |   |   |   |--- class: 0
 |   |--- Major_Axis_Length >  181.236
-|   |   |--- class: 0
+|   |   |--- Major_Axis_Length <= 189.511
+|   |   |   |--- Major_Axis_Length <= 181.332
+|   |   |   |   |--- class: 1
+|   |   |   |--- Major_Axis_Length >  181.332
+|   |   |   |   |--- Major_Axis_Length <= 186.506
+|   |   |   |   |   |--- class: 0
+|   |   |   |   |--- Major_Axis_Length >  186.506
+|   |   |   |   |   |--- class: 0
+|   |   |--- Major_Axis_Length >  189.511
+|   |   |   |--- Area <= 11569.500
+|   |   |   |   |--- class: 1
+|   |   |   |--- Area >  11569.500
+|   |   |   |   |--- Perimeter <= 455.467
+|   |   |   |   |   |--- class: 0
+|   |   |   |   |--- Perimeter >  455.467
+|   |   |   |   |   |--- class: 0
 |--- Major_Axis_Length >  191.817
 |   |--- Perimeter <= 467.825
-|   |   |--- class: 1
+|   |   |--- Major_Axis_Length <= 192.971
+|   |   |   |--- Major_Axis_Length <= 192.689
+|   |   |   |   |--- Area <= 12879.500
+|   |   |   |   |   |--- class: 1
+|   |   |   |   |--- Area >  12879.500
+|   |   |   |   |   |--- class: 0
+|   |   |   |--- Major_Axis_Length >  192.689
+|   |   |   |   |--- Major_Axis_Length <= 192.852
+|   |   |   |   |   |--- class: 0
+|   |   |   |   |--- Major_Axis_Length >  192.852
+|   |   |   |   |   |--- class: 0
+|   |   |--- Major_Axis_Length >  192.971
+|   |   |   |--- Perimeter <= 467.576
+|   |   |   |   |--- Minor_Axis_Length <= 88.663
+|   |   |   |   |   |--- class: 1
+|   |   |   |   |--- Minor_Axis_Length >  88.663
+|   |   |   |   |   |--- class: 0
+|   |   |   |--- Perimeter >  467.576
+|   |   |   |   |--- class: 0
 |   |--- Perimeter >  467.825
-|   |   |--- class: 1
+|   |   |--- Major_Axis_Length <= 198.145
+|   |   |   |--- Convex_Area <= 13420.500
+|   |   |   |   |--- class: 1
+|   |   |   |--- Convex_Area >  13420.500
+|   |   |   |   |--- Major_Axis_Length <= 197.999
+|   |   |   |   |   |--- class: 1
+|   |   |   |   |--- Major_Axis_Length >  197.999
+|   |   |   |   |   |--- class: 0
+|   |   |--- Major_Axis_Length >  198.145
+|   |   |   |--- Convex_Area <= 13330.000
+|   |   |   |   |--- Convex_Area <= 13261.000
+|   |   |   |   |   |--- class: 1
+|   |   |   |   |--- Convex_Area >  13261.000
+|   |   |   |   |   |--- class: 0
+|   |   |   |--- Convex_Area >  13330.000
+|   |   |   |   |--- Major_Axis_Length <= 206.059
+|   |   |   |   |   |--- class: 1
+|   |   |   |   |--- Major_Axis_Length >  206.059
+|   |   |   |   |   |--- class: 1

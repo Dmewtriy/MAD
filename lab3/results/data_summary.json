@@ -1,0 +1,144 @@
+{
+  "n": 45211,
+  "p": 16,
+  "numeric": [
+    "age",
+    "balance",
+    "day",
+    "duration",
+    "campaign",
+    "pdays",
+    "previous"
+  ],
+  "categorical": [
+    "job",
+    "marital",
+    "education",
+    "default",
+    "housing",
+    "loan",
+    "contact",
+    "month",
+    "poutcome"
+  ],
+  "target": "y",
+  "duplicates_raw": 0,
+  "duplicates_features": 0,
+  "duplicates_after_binning": 6939,
+  "missing_cells": 0,
+  "unknown_rows": 37369,
+  "duration_quartiles": [
+    103.0,
+    180.0,
+    319.0
+  ],
+  "positive_rate": 0.11698480458295547,
+  "prepared_levels": {
+    "age": [
+      "18-30",
+      "31-45",
+      "46-60",
+      "61+"
+    ],
+    "job": [
+      "admin.",
+      "blue-collar",
+      "entrepreneur",
+      "housemaid",
+      "management",
+      "retired",
+      "self-employed",
+      "services",
+      "student",
+      "technician",
+      "unemployed",
+      "unknown"
+    ],
+    "marital": [
+      "divorced",
+      "married",
+      "single"
+    ],
+    "education": [
+      "primary",
+      "secondary",
+      "tertiary",
+      "unknown"
+    ],
+    "default": [
+      "no",
+      "yes"
+    ],
+    "balance": [
+      "1-1000",
+      "1001-5000",
+      "5001+",
+      "negative",
+      "zero"
+    ],
+    "housing": [
+      "no",
+      "yes"
+    ],
+    "loan": [
+      "no",
+      "yes"
+    ],
+    "contact": [
+      "cellular",
+      "telephone",
+      "unknown"
+    ],
+    "day": [
+      "1-10",
+      "11-20",
+      "21-31"
+    ],
+    "month": [
+      "apr",
+      "aug",
+      "dec",
+      "feb",
+      "jan",
+      "jul",
+      "jun",
+      "mar",
+      "may",
+      "nov",
+      "oct",
+      "sep"
+    ],
+    "duration": [
+      "Q1",
+      "Q2",
+      "Q3",
+      "Q4"
+    ],
+    "campaign": [
+      "1",
+      "2",
+      "3-5",
+      "6+"
+    ],
+    "pdays": [
+      "0-90",
+      "181-365",
+      "366+",
+      "91-180",
+      "not_contacted"
+    ],
+    "previous": [
+      "0",
+      "1",
+      "2-3",
+      "4+"
+    ],
+    "poutcome": [
+      "failure",
+      "other",
+      "success",
+      "unknown"
+    ]
+  },
+  "preparation": "all 16 features, seven numeric features discretized; target excluded; unknown retained"
+}

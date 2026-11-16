@@ -1,9 +1,9 @@
 {
   "Дерево": {
-    "max_depth": 2,
-    "min_samples_leaf": 1,
-    "node_count": 7,
-    "n_leaves": 4,
+    "max_depth": 5,
+    "min_samples_leaf": 5,
+    "node_count": 53,
+    "n_leaves": 27,
     "root_gini": 0.489580534716625
   },
   "SVM": {

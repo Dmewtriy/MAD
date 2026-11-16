@@ -1,0 +1,3 @@
+cluster_1,cluster_2,n_pairs,mean_between_distance,center_distance,method
+1,2,165067230,0.5904037835068777,0.25,CLOPE
+1,2,420901074,0.5578554717289698,0.4375,k-modes

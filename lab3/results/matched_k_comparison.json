@@ -1,0 +1,6 @@
+{
+  "n_clusters": 2,
+  "kmodes_silhouette_validation": 0.08920636028051376,
+  "ARI_between_methods": 0.02493461494151081,
+  "kmodes_ARI_y": 0.07989652195938605
+}
