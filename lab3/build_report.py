@@ -147,7 +147,7 @@ class Report:
     def add_text(self, text):
         return self.document.add_paragraph(text)
 
-    def add_blank_line(self, new_page=False):
+    def add_blank_line(self):
         paragraphs = self.document.paragraphs
         previous = paragraphs[-1] if paragraphs else None
         if (previous is not None and not previous.text
@@ -162,13 +162,13 @@ class Report:
         paragraph_format.space_before = Pt(0)
         paragraph_format.space_after = Pt(0)
         paragraph_format.line_spacing_rule = WD_LINE_SPACING.ONE_POINT_FIVE
-        paragraph_format.page_break_before = new_page
+        paragraph_format.page_break_before = False
         paragraph_format.keep_with_next = True
 
     def add_goal(self, text):
-        self.add_blank_line()
         paragraph = self.document.add_paragraph("Цель работы")
         paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        paragraph.paragraph_format.space_before = Pt(0)
         paragraph.paragraph_format.keep_with_next = True
         for run in paragraph.runs:
             set_font(run, bold=True)
@@ -176,13 +176,17 @@ class Report:
         self.add_text(text)
 
     def add_heading(self, title, level=1, new_page=True):
-        self.add_blank_line(new_page=new_page)
+        # Интервал перед абзацем не создаёт пустую строку при переносе на новую страницу.
+        previous = self.document.paragraphs[-1] if self.document.paragraphs else None
+        if (previous is not None and not previous.text
+                and not previous.paragraph_format.page_break_before
+                and not previous._element.xpath('.//w:drawing | .//w:sectPr | .//w:br')):
+            previous._element.getparent().remove(previous._element)
         paragraph = self.document.add_heading(title, level=level)
         paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-        paragraph.paragraph_format.page_break_before = False
-        if level == 2:
-            paragraph.paragraph_format.space_before = Pt(0)
-            paragraph.paragraph_format.space_after = Pt(0)
+        paragraph.paragraph_format.page_break_before = new_page
+        paragraph.paragraph_format.space_before = Pt(0 if new_page else 21)
+        paragraph.paragraph_format.space_after = Pt(0)
         self.add_blank_line()
 
     def add_subheading(self, title):
@@ -664,35 +668,7 @@ def add_comparison_section(report):
         "стороны структуры и не дают универсального победителя."
     )
 
-    report.add_subheading("5.2 Чувствительность к признакам и ограничения")
-    sensitivity = pd.read_csv(RESULTS_DIR / "feature_sensitivity.csv")
-    report.add_text(
-        "Дополнительно удалены pdays и previous, оставлен poutcome. Параметры r = 1,1 "
-        "и k = 2 сохранены. ARI с основным разбиением показывает, насколько меняются назначения "
-        "при уменьшении повторного представления истории контактов; силуэты разных пространств "
-        "в этом опыте напрямую не сравниваются. В основном решении у обоих методов по два "
-        "кластера. После удаления признаков CLOPE формирует три группы, поскольку при "
-        "фиксированном r число кластеров не задано заранее; k-modes сохраняет заданные две группы."
-    )
-    report.add_table(
-        "Изменение разбиений после удаления двух исторических признаков",
-        ["Метод", "Признаков после удаления", "Кластеров в основном решении",
-         "Кластеров после удаления", "ARI с основным решением"],
-        [[row.method, int(row.n_features), int(metrics.loc[row.method, "n_clusters"]),
-          int(row.n_clusters), format_decimal(row.ARI_with_full_feature_solution, 4)]
-         for row in sensitivity.itertuples()],
-        [2.5, 3, 3.5, 3.5, 4],
-    )
-    report.add_figure("10_deposit_rates.png", "Доли оформленного депозита в кластерах; пунктир – весь набор")
-    report.add_text(
-        "Числовые признаки сведены к интервалам; их порядок и различия внутри интервалов "
-        "не учитываются. Unknown сохранено как отдельная категория. Календарные поля и история "
-        "кампаний могут отражать особенности сбора данных; duration известна только после "
-        "разговора. Работа описывает состоявшиеся контакты и не является моделью выбора клиента "
-        "до звонка. Выводы ограничены выбранным представлением и исследованными параметрами."
-    )
-
-    report.add_subheading("5.3 Выводы")
+    report.add_subheading("6 Выводы")
     report.add_text(
         "Для основного решения CLOPE выбраны два кластера при r = 1,1. Отдельная проверка "
         "показывает, что выделение группы из 51 записи в третий кластер не требуется: её "
@@ -711,10 +687,7 @@ def add_comparison_section(report):
 
 def build_report():
     report = Report()
-    report.add_goal(
-        "Изучить кластеризацию категориальных и смешанных данных, применить методы "
-        "CLOPE и k-modes к набору Bank Marketing, оценить качество, устойчивость и содержательный смысл полученных групп."
-    )
+    report.add_goal("Изучить кластеризацию категориальных и смешанных данных.")
     add_dataset_section(report)
     add_descriptive_section(report)
     add_clope_section(report)

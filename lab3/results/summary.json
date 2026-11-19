@@ -12,7 +12,7 @@
       "parameter": 1.1,
       "r": 1.1,
       "seed": 43,
-      "fit_seconds": 2.613055477999751,
+      "fit_seconds": 2.1119262359998174,
       "iterations": 1,
       "objective": 6038.596504266887,
       "clusters": [
@@ -21,7 +21,6 @@
           "n": 41205,
           "S": 659280,
           "W": 66,
-          "H": 9989.09090909091,
           "profit_contribution": 5987.939137210914
         },
         {
@@ -29,7 +28,6 @@
           "n": 4006,
           "S": 64096,
           "W": 73,
-          "H": 878.027397260274,
           "profit_contribution": 50.657367055972855
         }
       ],
@@ -59,7 +57,7 @@
       "seed": 42,
       "n_init": 3,
       "init": "Huang",
-      "fit_seconds": 9.598940659999698,
+      "fit_seconds": 9.049789826000051,
       "iterations": 3,
       "objective": 278446.0,
       "modes_encoded": {

@@ -1,18 +1,29 @@
-"""Кластеризация Bank Marketing методами CLOPE и k-modes.
+"""ЛР 3. Кластеризация Bank Marketing методами CLOPE и k-modes.
 
-Запуск: lab3/.venv/bin/python lab3/clustering_analysis.py
-Данные, таблицы и рисунки сохраняются в lab3/results.
+Запуск из MAD: lab3/.venv/bin/python lab3/clustering_analysis.py
+Чтение, категоризация и дескриптивный анализ находятся в data_preparation.py.
+Таблицы и рисунки сохраняются в results; Word создаётся отдельно build_report.py.
+
+Порядок работы:
+    1. Чтение и подготовка общих категориальных признаков.
+    2. Подвыборки для настройки и контрольной оценки силуэта.
+    3. Подбор r для CLOPE и k для k-modes.
+    4. Оценка лучших разбиений: расстояния, компактность, центры и силуэты.
+    5. Проверка необходимости третьего кластера CLOPE.
+    6. Сравнение методов и сохранение параметров.
+    7. Графики для отчёта.
+
+Оба метода обучаются на всех строках; подвыборки нужны только для оценки.
+Ответ Y не используется при обучении. Стандартизация категорий не применяется.
 """
 
 from collections import Counter
-from io import BytesIO
+from dataclasses import dataclass
 from itertools import combinations
 import json
 import os
 from pathlib import Path
 import time
-from urllib.request import urlopen
-from zipfile import ZipFile
 
 BASE_DIR = Path(__file__).resolve().parent
 RESULTS_DIR = BASE_DIR / "results"
@@ -22,7 +33,7 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "2")
 
 import matplotlib
 
-matplotlib.use("Agg")
+matplotlib.use("Agg")  # сохраняем рисунки в файлы, без окна
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -30,191 +41,53 @@ import seaborn as sns
 from kmodes.kmodes import KModes
 from scipy.spatial.distance import cdist
 from scipy.stats.contingency import association
-from sklearn.metrics import (
-    adjusted_mutual_info_score,
-    adjusted_rand_score,
-    normalized_mutual_info_score,
-    silhouette_samples,
-    silhouette_score,
-)
-from sklearn.metrics.cluster import contingency_matrix
+from sklearn.metrics import adjusted_rand_score, silhouette_score
 
+from data_preparation import FEATURE_NAMES, prepare_data
 from vendor.pyclope import CLOPE
+
+# ---------------------------------------------------------------------------
+# Константы
+# ---------------------------------------------------------------------------
 
 RANDOM_SEED = 42
 SAMPLE_SEED = 20261114
 SAMPLE_SIZE = 3000
-STABILITY_SEEDS = (43, 44)
 CLOPE_N_INIT = 3
-DATASET_URL = "https://archive.ics.uci.edu/static/public/222/bank+marketing.zip"
 PARAMETER_GRID = {
     "CLOPE": [1.01, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8],
     "k-modes": [2, 3, 4, 5, 6, 8, 10],
 }
-NUMERIC_FEATURES = ["age", "balance", "day", "duration", "campaign", "pdays", "previous"]
-FEATURE_NAMES = {
-    "age": "Возраст",
-    "job": "Профессия",
-    "marital": "Семейное положение",
-    "education": "Образование",
-    "default": "Просроченный кредит",
-    "balance": "Баланс, евро",
-    "housing": "Ипотечный кредит",
-    "loan": "Потребительский кредит",
-    "contact": "Способ контакта",
-    "day": "День месяца",
-    "month": "Месяц",
-    "duration": "Длительность, с",
-    "campaign": "Контакты в кампании",
-    "pdays": "Дней с прошлого контакта",
-    "previous": "Предыдущие контакты",
-    "poutcome": "Исход прошлой кампании",
-}
 
+
+@dataclass
+class Dataset:
+    """Исходные данные, категории и две непересекающиеся подвыборки для оценки."""
+
+    df: pd.DataFrame                   # исходная таблица вместе с ответом Y
+    features: pd.DataFrame             # 16 категориальных признаков без Y
+    X: np.ndarray                      # коды категорий; значимы только их совпадения
+    selection_rows: np.ndarray         # строки для выбора r и k
+    validation_rows: np.ndarray        # строки для контрольной оценки
+    selection_distances: np.ndarray    # матрица Хэмминга для настройки
+    validation_distances: np.ndarray   # матрица Хэмминга для контроля
+
+
+# ---------------------------------------------------------------------------
+# Вспомогательные функции
+# ---------------------------------------------------------------------------
 
 def save_json(filename, data):
+    """Сохраняет параметры или итоговые показатели в results."""
     path = RESULTS_DIR / filename
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def load_raw_data():
-    """Загрузить локальный CSV; при его отсутствии скачать исходный архив UCI."""
-    RESULTS_DIR.mkdir(exist_ok=True)
-    csv_path = RESULTS_DIR / "bank-full.csv"
-    if not csv_path.exists():
-        with urlopen(DATASET_URL, timeout=90) as response:
-            archive_bytes = response.read()
-        with ZipFile(BytesIO(archive_bytes)) as outer_archive:
-            bank_archive_name = next(
-                name for name in outer_archive.namelist() if name.endswith("bank.zip")
-            )
-            with ZipFile(BytesIO(outer_archive.read(bank_archive_name))) as bank_archive:
-                for filename in ("bank-full.csv", "bank-names.txt"):
-                    (RESULTS_DIR / filename).write_bytes(bank_archive.read(filename))
-    return pd.read_csv(csv_path, sep=";")
-
-
-def categorize_features(raw_data):
-    """Исключить ответ Y и заменить семь числовых признаков интервалами."""
-    features = raw_data.drop(columns="y").copy()
-    duration_quartiles = raw_data["duration"].quantile([0.25, 0.5, 0.75]).tolist()
-    rules = {
-        "age": ([-np.inf, 30, 45, 60, np.inf], ["18-30", "31-45", "46-60", "61+"]),
-        "balance": (
-            [-np.inf, -1, 0, 1000, 5000, np.inf],
-            ["negative", "zero", "1-1000", "1001-5000", "5001+"],
-        ),
-        "day": ([-np.inf, 10, 20, np.inf], ["1-10", "11-20", "21-31"]),
-        "duration": ([-np.inf, *duration_quartiles, np.inf], ["Q1", "Q2", "Q3", "Q4"]),
-        "campaign": ([-np.inf, 1, 2, 5, np.inf], ["1", "2", "3-5", "6+"]),
-        "pdays": (
-            [-np.inf, -1, 90, 180, 365, np.inf],
-            ["not_contacted", "0-90", "91-180", "181-365", "366+"],
-        ),
-        "previous": ([-np.inf, 0, 1, 3, np.inf], ["0", "1", "2-3", "4+"]),
-    }
-
-    binning_rows = []
-    for feature, (edges, categories) in rules.items():
-        features[feature] = pd.cut(
-            raw_data[feature], bins=edges, labels=categories, right=True
-        ).astype(str)
-        for index, category in enumerate(categories):
-            binning_rows.append({
-                "feature": feature,
-                "category": category,
-                "left_exclusive": str(edges[index]),
-                "right_inclusive": str(edges[index + 1]),
-                "count": int((features[feature] == category).sum()),
-            })
-    return features, pd.DataFrame(binning_rows), duration_quartiles
-
-
-def save_feature_statistics(raw_data, features):
-    """Сохранить описательные статистики, частоты категорий и качество полей."""
-    statistics = raw_data[NUMERIC_FEATURES].describe(percentiles=[0.25, 0.5, 0.75, 0.99]).T
-    statistics.to_csv(RESULTS_DIR / "numeric_statistics.csv", index_label="feature")
-    frequency_rows = []
-    quality_rows = []
-    for feature in features:
-        for category, count in features[feature].value_counts().items():
-            frequency_rows.append({
-                "feature": feature,
-                "category": category,
-                "count": int(count),
-                "percent": 100 * count / len(features),
-            })
-        quality_rows.append({
-            "feature": feature,
-            "type": "numeric" if feature in NUMERIC_FEATURES else "categorical",
-            "raw_levels": raw_data[feature].nunique(),
-            "prepared_levels": features[feature].nunique(),
-            "missing": int(raw_data[feature].isna().sum()),
-            "unknown": int((raw_data[feature] == "unknown").sum()),
-        })
-    pd.DataFrame(frequency_rows).to_csv(RESULTS_DIR / "category_frequencies.csv", index=False)
-    pd.DataFrame(quality_rows).to_csv(RESULTS_DIR / "feature_quality.csv", index=False)
-
-    class_balance = raw_data["y"].value_counts().rename_axis("class").reset_index(name="count")
-    class_balance["percent"] = class_balance["count"] / len(raw_data) * 100
-    class_balance.to_csv(RESULTS_DIR / "class_balance.csv", index=False)
-
-
-def save_feature_associations(features):
-    """Рассчитать V Крамера для каждой пары подготовленных признаков."""
-    associations = pd.DataFrame(
-        np.eye(len(features.columns)), index=features.columns, columns=features.columns
-    )
-    pair_rows = []
-    for feature, other_feature in combinations(features.columns, 2):
-        frequency_table = pd.crosstab(features[feature], features[other_feature])
-        cramers_v = float(association(frequency_table.to_numpy(), method="cramer", correction=False))
-        associations.loc[feature, other_feature] = cramers_v
-        associations.loc[other_feature, feature] = cramers_v
-        pair_rows.append({
-            "feature_1": feature,
-            "feature_2": other_feature,
-            "cramers_v": cramers_v,
-        })
-    associations.to_csv(RESULTS_DIR / "feature_associations.csv", index_label="feature")
-    pairs = pd.DataFrame(pair_rows).sort_values("cramers_v", ascending=False)
-    pairs.to_csv(RESULTS_DIR / "association_pairs.csv", index=False)
-
-
-def prepare_data():
-    """Подготовить общие для двух методов признаки и сохранить их описание."""
-    raw_data = load_raw_data()
-    assert raw_data.shape == (45211, 17)
-    assert not raw_data.isna().any().any()
-    features, binning_rules, duration_quartiles = categorize_features(raw_data)
-    assert not features.isna().any().any()
-
-    features.to_csv(RESULTS_DIR / "prepared_categorical.csv", index=False)
-    binning_rules.to_csv(RESULTS_DIR / "binning_rules.csv", index=False)
-    save_feature_statistics(raw_data, features)
-    save_feature_associations(features)
-    save_json("data_summary.json", {
-        "n": len(raw_data),
-        "p": len(features.columns),
-        "numeric": NUMERIC_FEATURES,
-        "categorical": [feature for feature in features if feature not in NUMERIC_FEATURES],
-        "target": "y",
-        "duplicates_raw": int(raw_data.duplicated().sum()),
-        "duplicates_features": int(raw_data.drop(columns="y").duplicated().sum()),
-        "duplicates_after_binning": int(features.duplicated().sum()),
-        "missing_cells": int(raw_data.isna().sum().sum()),
-        "unknown_rows": int((raw_data == "unknown").any(axis=1).sum()),
-        "duration_quartiles": duration_quartiles,
-        "positive_rate": float((raw_data["y"] == "yes").mean()),
-        "prepared_levels": {feature: sorted(features[feature].unique().tolist()) for feature in features},
-        "preparation": "all 16 features, seven numeric features discretized; target excluded; unknown retained",
-    })
-
-    # Числа обозначают категории; расстояние использует только совпадение кодов.
-    encoded_data = np.column_stack([
-        pd.Categorical(features[feature]).codes for feature in features
-    ]).astype(np.int16)
-    return raw_data, features, encoded_data
+def save_figure(figure, filename):
+    """Сохраняет рисунок в results и закрывает его."""
+    figure.tight_layout()
+    figure.savefig(RESULTS_DIR / filename)
+    plt.close(figure)
 
 
 def normalize_labels(labels):
@@ -225,6 +98,58 @@ def normalize_labels(labels):
     normalized = np.array([label_mapping[label] for label in labels], dtype=np.int32)
     return normalized, label_mapping
 
+
+# ---------------------------------------------------------------------------
+# 2. Подвыборки для настройки и контроля
+# ---------------------------------------------------------------------------
+
+def prepare_evaluation(df, features, X):
+    """Фиксирует подвыборки и общие матрицы расстояний для сравнения методов.
+
+    Модели получают все строки X.
+    Матрицы 3000 × 3000 нужны только для выбора параметров и контроля.
+    """
+    generator = np.random.default_rng(SAMPLE_SEED)
+    sampled_indices = generator.choice(len(X), 2 * SAMPLE_SIZE, replace=False)
+    selection_indices = sampled_indices[:SAMPLE_SIZE]
+    validation_indices = sampled_indices[SAMPLE_SIZE:]
+    pd.DataFrame({
+        "row_id": sampled_indices + 1,
+        "role": ["selection"] * SAMPLE_SIZE + ["validation"] * SAMPLE_SIZE,
+    }).to_csv(RESULTS_DIR / "evaluation_sample.csv", index=False)
+    selection_distances = cdist(
+        X[selection_indices], X[selection_indices], metric="hamming"
+    ).astype(np.float32)
+    validation_distances = cdist(
+        X[validation_indices], X[validation_indices], metric="hamming"
+    ).astype(np.float32)
+    return Dataset(
+        df=df, features=features, X=X,
+        selection_rows=selection_indices, validation_rows=validation_indices,
+        selection_distances=selection_distances, validation_distances=validation_distances,
+    )
+
+
+def evaluate_selection(labels, sample_indices, distances):
+    """Силуэт настройки и размеры групп для таблиц подбора параметров."""
+    cluster_sizes = np.unique(labels, return_counts=True)[1]
+    sampled_labels = labels[sample_indices]
+    sampled_clusters = len(np.unique(sampled_labels))
+    silhouette = np.nan
+    if 1 < sampled_clusters < len(sample_indices):
+        silhouette = float(silhouette_score(distances, sampled_labels, metric="precomputed"))
+
+    return {
+        "n_clusters": len(cluster_sizes),
+        "silhouette_selection": silhouette,
+        "min_size": int(cluster_sizes.min()),
+        "max_size": int(cluster_sizes.max()),
+    }
+
+
+# ---------------------------------------------------------------------------
+# 3.1. CLOPE: один порядок строк и лучший из трёх запусков
+# ---------------------------------------------------------------------------
 
 def fit_clope(encoded_data, repulsion, seed=RANDOM_SEED):
     """Передать транзакции готовому CLOPE через его функции чтения и записи."""
@@ -272,7 +197,6 @@ def fit_clope(encoded_data, repulsion, seed=RANDOM_SEED):
             "n": cluster.N,
             "S": cluster.S,
             "W": cluster.W,
-            "H": cluster.S / cluster.W,
             "profit_contribution": cluster.S * cluster.N / cluster.W**repulsion / len(encoded_data),
         })
     assert sum(cluster.N for cluster in model.clusters) == len(encoded_data)
@@ -286,6 +210,34 @@ def fit_clope(encoded_data, repulsion, seed=RANDOM_SEED):
         "clusters": sorted(cluster_parameters, key=lambda cluster: cluster["cluster"]),
     }
 
+
+def fit_clope_multistart(encoded_data, repulsion, seed=RANDOM_SEED):
+    """При одном r выбрать максимальный Profit из трёх начальных порядков."""
+    runs = [
+        fit_clope(encoded_data, repulsion, current_seed)
+        for current_seed in range(seed, seed + CLOPE_N_INIT)
+    ]
+    labels, best_details = max(runs, key=lambda run: run[1]["objective"])
+    details = {
+        **best_details,
+        "n_init": CLOPE_N_INIT,
+        "start_seed": seed,
+        "fit_seconds": sum(run_details["fit_seconds"] for _, run_details in runs),
+        "initializations": [
+            {
+                "seed": run_details["seed"],
+                "n_clusters": len(np.unique(run_labels)),
+                "objective": run_details["objective"],
+            }
+            for run_labels, run_details in runs
+        ],
+    }
+    return labels, details
+
+
+# ---------------------------------------------------------------------------
+# 3.2. K-modes: модальные центры и стоимость разбиения
+# ---------------------------------------------------------------------------
 
 def fit_kmodes(encoded_data, n_clusters, seed=RANDOM_SEED, n_init=3):
     """Обучить k-modes и сохранить именно те моды, которые выбрала модель."""
@@ -321,31 +273,12 @@ def fit_kmodes(encoded_data, n_clusters, seed=RANDOM_SEED, n_init=3):
     }
 
 
-def fit_clope_multistart(encoded_data, repulsion, seed=RANDOM_SEED):
-    """При одном r выбрать максимальный Profit из трёх начальных порядков."""
-    runs = [
-        fit_clope(encoded_data, repulsion, current_seed)
-        for current_seed in range(seed, seed + CLOPE_N_INIT)
-    ]
-    labels, best_details = max(runs, key=lambda run: run[1]["objective"])
-    details = {
-        **best_details,
-        "n_init": CLOPE_N_INIT,
-        "start_seed": seed,
-        "fit_seconds": sum(run_details["fit_seconds"] for _, run_details in runs),
-        "initializations": [
-            {
-                "seed": run_details["seed"],
-                "n_clusters": len(np.unique(run_labels)),
-                "objective": run_details["objective"],
-            }
-            for run_labels, run_details in runs
-        ],
-    }
-    return labels, details
-
+# ---------------------------------------------------------------------------
+# 3.3. Подбор параметров двух методов
+# ---------------------------------------------------------------------------
 
 def run_method(method, encoded_data, parameter, seed=RANDOM_SEED):
+    """Обучает выбранный метод и выводит краткий результат запуска."""
     if method == "CLOPE":
         labels, details = fit_clope_multistart(encoded_data, parameter, seed)
     elif method == "k-modes":
@@ -359,47 +292,15 @@ def run_method(method, encoded_data, parameter, seed=RANDOM_SEED):
     return labels, details
 
 
-def create_evaluation_samples(n_rows):
-    """Выбрать две непересекающиеся подвыборки для настройки и контроля."""
-    generator = np.random.default_rng(SAMPLE_SEED)
-    sampled_indices = generator.choice(n_rows, 2 * SAMPLE_SIZE, replace=False)
-    selection_indices = sampled_indices[:SAMPLE_SIZE]
-    validation_indices = sampled_indices[SAMPLE_SIZE:]
-    pd.DataFrame({
-        "row_id": sampled_indices + 1,
-        "role": ["selection"] * SAMPLE_SIZE + ["validation"] * SAMPLE_SIZE,
-    }).to_csv(RESULTS_DIR / "evaluation_sample.csv", index=False)
-    return selection_indices, validation_indices
-
-
-def evaluate_selection(labels, sample_indices, distances):
-    cluster_sizes = np.unique(labels, return_counts=True)[1]
-    sampled_labels = labels[sample_indices]
-    sampled_clusters = len(np.unique(sampled_labels))
-    silhouette = np.nan
-    if 1 < sampled_clusters < len(sample_indices):
-        silhouette = float(silhouette_score(distances, sampled_labels, metric="precomputed"))
-
-    small_cluster_sizes = cluster_sizes[cluster_sizes < 0.01 * len(labels)]
-    return {
-        "n_clusters": len(cluster_sizes),
-        "silhouette_selection": silhouette,
-        "min_size": int(cluster_sizes.min()),
-        "max_size": int(cluster_sizes.max()),
-        "small_cluster_fraction": float(small_cluster_sizes.sum() / len(labels)),
-        "sampled_clusters": sampled_clusters,
-    }
-
-
-def search_parameters(encoded_data, selection_indices, selection_distances):
+def tune_models(data):
     """Проверить сетку параметров, сохраняя метки для последующего сравнения."""
     search_rows = []
     fitted_results = {}
     for method, parameters in PARAMETER_GRID.items():
         for parameter in parameters:
-            labels, details = run_method(method, encoded_data, parameter)
+            labels, details = run_method(method, data.X, parameter)
             fitted_results[method, parameter] = (labels, details)
-            scores = evaluate_selection(labels, selection_indices, selection_distances)
+            scores = evaluate_selection(labels, data.selection_rows, data.selection_distances)
             search_rows.append({
                 "method": method,
                 "parameter": parameter,
@@ -414,10 +315,9 @@ def search_parameters(encoded_data, selection_indices, selection_distances):
     return search_rows, fitted_results
 
 
-def purity(target, labels):
-    frequency_table = contingency_matrix(target, labels)
-    return float(frequency_table.max(axis=0).sum() / frequency_table.sum())
-
+# ---------------------------------------------------------------------------
+# 4. Расстояния, компактность, центры и профили кластеров
+# ---------------------------------------------------------------------------
 
 def evaluate_cluster_geometry(encoded_data, labels, fitted_centers=None):
     """Точные расстояния Хэмминга и силуэты по всем строкам через частоты категорий.
@@ -430,6 +330,8 @@ def evaluate_cluster_geometry(encoded_data, labels, fitted_centers=None):
     distance_sums = np.zeros((n_rows, len(clusters)), dtype=float)
     centers = {int(cluster): [] for cluster in clusters}
 
+    # 1. Частоты категорий дают модальные центры и суммы расстояний до групп.
+    # Для одного признака: сумма несовпадений = размер группы − число совпадений.
     for feature_index in range(n_features):
         values = encoded_data[:, feature_index]
         category_counts = np.vstack([
@@ -443,6 +345,8 @@ def evaluate_cluster_geometry(encoded_data, labels, fitted_centers=None):
     if fitted_centers is not None:
         centers = fitted_centers
 
+    # 2. Силуэт: a – среднее расстояние до своей группы без самого объекта;
+    # b – минимальное среднее расстояние до остальных групп.
     row_indices = np.arange(n_rows)
     own_clusters = np.searchsorted(clusters, labels)
     own_sizes = cluster_sizes[own_clusters]
@@ -460,6 +364,7 @@ def evaluate_cluster_geometry(encoded_data, labels, fitted_centers=None):
         )
         silhouettes[own_sizes == 1] = 0
 
+    # 3. Компактность: среднее расстояние до моды; радиус – максимальное.
     distance_to_mode = np.zeros(n_rows)
     cluster_rows = []
     for cluster in clusters:
@@ -475,6 +380,7 @@ def evaluate_cluster_geometry(encoded_data, labels, fitted_centers=None):
             "negative_silhouette_percent_full": float(100 * (silhouettes[mask] < 0).mean()),
         })
 
+    # 4. Межкластерные расстояния: между модами и между всеми парами объектов.
     center_distances = cdist(
         np.array([centers[int(cluster)] for cluster in clusters]),
         np.array([centers[int(cluster)] for cluster in clusters]),
@@ -493,6 +399,7 @@ def evaluate_cluster_geometry(encoded_data, labels, fitted_centers=None):
             "center_distance": float(center_distances[first_index, second_index]),
         })
 
+    # Общие расстояния взвешены числом пар, компактность и силуэт – числом строк.
     within_pairs = np.sum(cluster_sizes * (cluster_sizes - 1))
     between_pairs = sum(row["n_pairs"] for row in between_rows)
     metrics = {
@@ -515,12 +422,10 @@ def evaluate_cluster_geometry(encoded_data, labels, fitted_centers=None):
     }
 
 
-def save_cluster_profiles(raw_data, features, labels, method, geometry):
+def save_cluster_profiles(data, labels, method, geometry):
     """Сохранить размеры, моды, частоты и связь признаков с кластерами."""
+    raw_data, features = data.df, data.features
     summaries, category_profiles, modes = [], [], []
-    overall_frequencies = {
-        feature: features[feature].value_counts(normalize=True) for feature in features
-    }
     feature_categories = {
         feature: pd.Categorical(features[feature]).categories for feature in features
     }
@@ -538,31 +443,24 @@ def save_cluster_profiles(raw_data, features, labels, method, geometry):
                 "cluster": int(cluster),
                 "feature": feature,
                 "mode": mode,
-                "mode_percent": float(100 * frequencies[mode]),
             })
             for category, fraction in frequencies.items():
-                overall_fraction = overall_frequencies[feature][category]
                 category_profiles.append({
                     "method": method,
                     "cluster": int(cluster),
                     "feature": feature,
                     "category": category,
                     "fraction": float(fraction),
-                    "overall_fraction": float(overall_fraction),
-                    "lift": float(fraction / overall_fraction),
-                    "difference_pp": float(100 * (fraction - overall_fraction)),
                 })
         summaries.append({
             "method": method,
             "cluster": int(cluster),
             "n": int(cluster_mask.sum()),
             "percent": float(100 * cluster_mask.mean()),
-            "yes_count": int((cluster_raw["y"] == "yes").sum()),
             "yes_percent": float(100 * (cluster_raw["y"] == "yes").mean()),
             **geometry["cluster_metrics"].loc[cluster].to_dict(),
             "age_median": float(cluster_raw["age"].median()),
             "balance_median": float(cluster_raw["balance"].median()),
-            "duration_median": float(cluster_raw["duration"].median()),
             "housing_yes_percent": float(100 * (cluster_raw["housing"] == "yes").mean()),
             "previous_zero_percent": float(100 * (cluster_raw["previous"] == 0).mean()),
         })
@@ -581,37 +479,11 @@ def save_cluster_profiles(raw_data, features, labels, method, geometry):
     return geometry["distance_to_mode"]
 
 
-def evaluate_stability(method, encoded_data, parameter, base_labels, base_seed):
-    """Сравнить попарно три запуска с разными seed при одном параметре."""
-    labels_by_seed = {base_seed: base_labels}
-    for seed in (RANDOM_SEED, *STABILITY_SEEDS):
-        if seed not in labels_by_seed:
-            result = (fit_clope(encoded_data, parameter, seed) if method == "CLOPE"
-                      else run_method(method, encoded_data, parameter, seed))
-            labels_by_seed[seed] = result[0]
-
-    comparison_rows = []
-    for (first_seed, first_labels), (second_seed, second_labels) in combinations(labels_by_seed.items(), 2):
-        comparison_rows.append({
-            "method": method,
-            "seed_1": first_seed,
-            "seed_2": second_seed,
-            "ARI": adjusted_rand_score(first_labels, second_labels),
-            "clusters_1": len(np.unique(first_labels)),
-            "clusters_2": len(np.unique(second_labels)),
-        })
-    return comparison_rows, labels_by_seed
-
-
-def evaluate_best_models(
-    raw_data, features, encoded_data, search_rows, fitted_results,
-    validation_indices, validation_distances,
-):
+def evaluate_models(data, search_rows, fitted_results):
     """Выбрать лучшие параметры по силуэту и оценить полученные разбиения."""
     selected_models = {}
-    metric_rows, silhouette_tables, stability_rows, between_tables = [], [], [], []
-    stability_labels = {}
-    assignments = pd.DataFrame({"row_id": np.arange(1, len(raw_data) + 1), "y": raw_data["y"]})
+    metric_rows, silhouette_tables, between_tables = [], [], []
+    assignments = pd.DataFrame({"row_id": np.arange(1, len(data.df) + 1), "y": data.df["y"]})
 
     for method in PARAMETER_GRID:
         candidates = [
@@ -621,15 +493,15 @@ def evaluate_best_models(
         best = max(candidates, key=lambda row: row["silhouette_selection"])
         labels, details = fitted_results[method, best["parameter"]]
         selected_models[method] = {"parameter": best["parameter"], **details}
-        geometry = evaluate_cluster_geometry(encoded_data, labels, details.get("modes_encoded"))
+        geometry = evaluate_cluster_geometry(data.X, labels, details.get("modes_encoded"))
         assignments[method] = labels
-        assignments[f"{method}_distance_to_mode"] = save_cluster_profiles(
-            raw_data, features, labels, method, geometry
-        )
+        assignments[f"{method}_distance_to_mode"] = save_cluster_profiles(data, labels, method, geometry)
         between_tables.append(geometry["between_clusters"].assign(method=method))
 
-        validation_labels = labels[validation_indices]
-        silhouettes = silhouette_samples(validation_distances, validation_labels, metric="precomputed")
+        validation_labels = labels[data.validation_rows]
+        validation_silhouette = silhouette_score(
+            data.validation_distances, validation_labels, metric="precomputed"
+        )
         silhouette_tables.append(pd.DataFrame({
             "method": method,
             "row_id": np.arange(1, len(labels) + 1),
@@ -638,39 +510,22 @@ def evaluate_best_models(
         }))
         metric_rows.append({
             **best,
-            "silhouette_validation": float(silhouettes.mean()),
-            "negative_silhouette_percent": float(100 * np.mean(silhouettes < 0)),
-            "ARI_y": float(adjusted_rand_score(raw_data["y"], labels)),
-            "AMI_y": float(adjusted_mutual_info_score(raw_data["y"], labels)),
-            "NMI_y": float(normalized_mutual_info_score(raw_data["y"], labels)),
-            "purity": purity(raw_data["y"], labels),
+            "silhouette_validation": float(validation_silhouette),
+            "ARI_y": float(adjusted_rand_score(data.df["y"], labels)),
             **geometry["metrics"],
         })
-        if method == "CLOPE":
-            pd.DataFrame(details["clusters"]).to_csv(RESULTS_DIR / "CLOPE_cluster_parameters.csv", index=False)
-
-        comparisons, labels_by_seed = evaluate_stability(
-            method, encoded_data, best["parameter"], labels, details["seed"]
-        )
-        stability_rows.extend(comparisons)
-        for seed, run_labels in labels_by_seed.items():
-            stability_labels[f"{method}_{seed}"] = run_labels
-
     metrics = pd.DataFrame(metric_rows)
-    for method in PARAMETER_GRID:
-        ari_values = [row["ARI"] for row in stability_rows if row["method"] == method]
-        metrics.loc[metrics["method"] == method, "stability_ARI_mean"] = np.mean(ari_values)
-        metrics.loc[metrics["method"] == method, "stability_ARI_min"] = np.min(ari_values)
-
     silhouettes = pd.concat(silhouette_tables)
-    np.savez_compressed(RESULTS_DIR / "stability_labels.npz", **stability_labels)
-    pd.DataFrame(stability_rows).to_csv(RESULTS_DIR / "stability.csv", index=False)
     silhouettes.to_csv(RESULTS_DIR / "silhouette_values.csv", index=False)
     assignments.to_csv(RESULTS_DIR / "assignments.csv", index=False)
     metrics.to_csv(RESULTS_DIR / "metrics.csv", index=False)
     pd.concat(between_tables).to_csv(RESULTS_DIR / "intercluster_distances.csv", index=False)
     return selected_models, assignments, metrics, silhouettes
 
+
+# ---------------------------------------------------------------------------
+# 5. Необходимость третьего кластера CLOPE
+# ---------------------------------------------------------------------------
 
 def compare_clope_cluster_counts(encoded_data, fitted_results):
     """Сравнить два запуска при одном r и отдельно проверить слияние малой группы."""
@@ -723,54 +578,40 @@ def compare_clope_cluster_counts(encoded_data, fitted_results):
     pd.DataFrame(comparison_rows).to_csv(RESULTS_DIR / "CLOPE_cluster_count_comparison.csv", index=False)
 
 
-def compare_same_cluster_count(
-    encoded_data, assignments, fitted_results, validation_indices, validation_distances,
-):
-    """Дополнительно сравнить методы при числе групп, полученном CLOPE."""
-    n_clusters = assignments["CLOPE"].nunique()
-    if ("k-modes", n_clusters) in fitted_results:
-        matched_labels = fitted_results["k-modes", n_clusters][0]
-    else:
-        matched_labels = run_method("k-modes", encoded_data, n_clusters)[0]
-    save_json("matched_k_comparison.json", {
-        "n_clusters": int(n_clusters),
-        "kmodes_silhouette_validation": float(silhouette_score(
-            validation_distances, matched_labels[validation_indices], metric="precomputed"
-        )),
-        "ARI_between_methods": float(adjusted_rand_score(assignments["CLOPE"], matched_labels)),
-        "kmodes_ARI_y": float(adjusted_rand_score(assignments["y"], matched_labels)),
+# ---------------------------------------------------------------------------
+# 6. Сравнение методов и сохранение параметров
+# ---------------------------------------------------------------------------
+
+def save_model_comparison(data, selected_models, assignments):
+    """Сохраняет параметры лучших запусков и ARI между двумя методами."""
+    comparison_ari = float(adjusted_rand_score(assignments["CLOPE"], assignments["k-modes"]))
+    save_json("summary.json", {
+        "n": len(data.X),
+        "p": data.X.shape[1],
+        "selection_sample_size": SAMPLE_SIZE,
+        "validation_sample_size": SAMPLE_SIZE,
+        "sample_seed": SAMPLE_SEED,
+        "distance": "normalized Hamming; Gower for complete nominal data with equal weights",
+        "selection_rule": "CLOPE: maximum Profit over three orders at each r; then maximum selection silhouette; no target used",
+        "quality_evaluation": "exact full-data Hamming distances, modal compactness and silhouette via category counts",
+        "selected": selected_models,
+        "cross_method_ARI": comparison_ari,
     })
+    return comparison_ari
 
 
-def evaluate_feature_sensitivity(features, encoded_data, assignments, selected_models):
-    """Проверить влияние двух связанных признаков без изменения параметров."""
-    removed_features = ["pdays", "previous"]
-    retained_columns = [feature not in removed_features for feature in features]
-    reduced_data = encoded_data[:, retained_columns]
-    sensitivity_rows = []
-    reduced_assignments = pd.DataFrame({"row_id": assignments["row_id"]})
-    for method in PARAMETER_GRID:
-        parameter = selected_models[method]["parameter"]
-        reduced_labels = run_method(method, reduced_data, parameter)[0]
-        reduced_assignments[method] = reduced_labels
-        sensitivity_rows.append({
-            "method": method,
-            "removed": ", ".join(removed_features),
-            "n_features": reduced_data.shape[1],
-            "n_clusters": len(np.unique(reduced_labels)),
-            "ARI_with_full_feature_solution": float(adjusted_rand_score(assignments[method], reduced_labels)),
-        })
-    pd.DataFrame(sensitivity_rows).to_csv(RESULTS_DIR / "feature_sensitivity.csv", index=False)
-    reduced_assignments.to_csv(RESULTS_DIR / "sensitivity_assignments.csv", index=False)
+# ---------------------------------------------------------------------------
+# 7. Графики для отчёта
+# ---------------------------------------------------------------------------
 
-
-def save_figure(figure, filename):
-    figure.tight_layout()
-    figure.savefig(RESULTS_DIR / filename)
-    plt.close(figure)
+def configure_plots():
+    """Общий шрифт, стиль и разрешение всех рисунков."""
+    sns.set_theme(style="whitegrid", font="DejaVu Sans", font_scale=0.9)
+    plt.rcParams.update({"figure.dpi": 120, "savefig.dpi": 180, "axes.titleweight": "bold"})
 
 
 def plot_parameter_selection(search_results):
+    """Силуэт при разных r и k; подписи показывают число непустых групп."""
     figure, axes = plt.subplots(1, 2, figsize=(6.5, 3.5))
     for axis, method in zip(axes, PARAMETER_GRID):
         method_results = search_results[search_results["method"] == method]
@@ -794,6 +635,7 @@ def plot_parameter_selection(search_results):
 
 
 def plot_cluster_sizes(assignments):
+    """Размеры групп в двух лучших разбиениях."""
     figure, axes = plt.subplots(1, 2, figsize=(6.5, 3.5))
     for axis, method in zip(axes, PARAMETER_GRID):
         counts = assignments[method].value_counts().sort_index()
@@ -803,6 +645,7 @@ def plot_cluster_sizes(assignments):
 
 
 def plot_feature_importance():
+    """V Крамера для связи каждого признака с номером кластера."""
     tables = [
         pd.read_csv(RESULTS_DIR / f"{method}_feature_importance.csv") for method in PARAMETER_GRID
     ]
@@ -820,6 +663,7 @@ def plot_feature_importance():
 
 
 def plot_silhouettes(silhouettes):
+    """Индивидуальные силуэты всех строк, упорядоченные внутри каждой группы."""
     figure, axes = plt.subplots(1, 2, figsize=(6.5, 4.3), sharex=True)
     for axis, method in zip(axes, PARAMETER_GRID):
         method_values = silhouettes[silhouettes["method"] == method]
@@ -839,84 +683,38 @@ def plot_silhouettes(silhouettes):
     save_figure(figure, "08_silhouettes.png")
 
 
-def plot_cluster_overlap(assignments):
-    frequency_table = pd.crosstab(assignments["CLOPE"], assignments["k-modes"])
-    row_proportions = frequency_table.div(frequency_table.sum(axis=1), axis=0)
-    figure, axis = plt.subplots(figsize=(6.5, 4))
-    sns.heatmap(
-        row_proportions, cmap="Blues", vmin=0, vmax=1, annot=True, fmt=".2f", ax=axis,
-        cbar_kws={"label": "Доля внутри кластера CLOPE"},
-    )
-    axis.set(title="Соответствие двух разбиений", xlabel="Кластер k-modes", ylabel="Кластер CLOPE")
-    save_figure(figure, "09_cluster_overlap.png")
+# ---------------------------------------------------------------------------
+# Точка входа
+# ---------------------------------------------------------------------------
 
+def main():
+    RESULTS_DIR.mkdir(exist_ok=True)
 
-def plot_deposit_rates(assignments):
-    figure, axes = plt.subplots(1, 2, figsize=(6.5, 3.5))
-    overall_rate = 100 * (assignments["y"] == "yes").mean()
-    for axis, method in zip(axes, PARAMETER_GRID):
-        profiles = pd.read_csv(RESULTS_DIR / f"{method}_cluster_profiles.csv")
-        axis.bar(profiles["cluster"].astype(str), profiles["yes_percent"], color="#527a96")
-        axis.axhline(overall_rate, color="#ba5a3a", linestyle="--", label="Весь набор")
-        axis.set(title=method, xlabel="Кластер", ylabel="Оформлен депозит, %")
-        axis.legend()
-    save_figure(figure, "10_deposit_rates.png")
+    # 1. Чтение, категоризация и дескриптивная статистика
+    df, features, X = prepare_data(RESULTS_DIR)
 
+    # 2. Общие для двух методов подвыборки и матрицы Хэмминга.
+    data = prepare_evaluation(df, features, X)
 
-def make_figures(search_results, assignments, silhouettes):
-    sns.set_theme(style="whitegrid", font="DejaVu Sans", font_scale=0.9)
-    plt.rcParams.update({"figure.dpi": 120, "savefig.dpi": 180, "axes.titleweight": "bold"})
-    plot_parameter_selection(search_results)
+    # 3. Подбор r для CLOPE и k для k-modes без использования Y.
+    search_rows, fitted_results = tune_models(data)
+
+    # 4. Лучшие разбиения: качество, центры, профили и важность признаков.
+    selected_models, assignments, metrics, silhouettes = evaluate_models(data, search_rows, fitted_results)
+
+    # 5. Два и три кластера CLOPE; отдельно – объединение малой группы.
+    compare_clope_cluster_counts(data.X, fitted_results)
+
+    # 6. Согласие двух разбиений и параметры выбранных моделей.
+    comparison_ari = save_model_comparison(data, selected_models, assignments)
+
+    # 7. Рисунки строятся по тем же данным, которые сохранены в таблицах.
+    configure_plots()
+    plot_parameter_selection(pd.DataFrame(search_rows))
     plot_cluster_sizes(assignments)
     plot_feature_importance()
     plot_silhouettes(silhouettes)
-    plot_cluster_overlap(assignments)
-    plot_deposit_rates(assignments)
 
-
-def main():
-    # 1. Общая подготовка данных и две подвыборки для оценки силуэта.
-    raw_data, features, encoded_data = prepare_data()
-    selection_indices, validation_indices = create_evaluation_samples(len(encoded_data))
-    selection_distances = cdist(
-        encoded_data[selection_indices], encoded_data[selection_indices], metric="hamming"
-    ).astype(np.float32)
-    validation_distances = cdist(
-        encoded_data[validation_indices], encoded_data[validation_indices], metric="hamming"
-    ).astype(np.float32)
-
-    # 2. Настройка параметров и оценка лучших разбиений; Y не участвует в выборе.
-    search_rows, fitted_results = search_parameters(encoded_data, selection_indices, selection_distances)
-    selected_models, assignments, metrics, silhouettes = evaluate_best_models(
-        raw_data, features, encoded_data, search_rows, fitted_results,
-        validation_indices, validation_distances,
-    )
-
-    # 3. Сравнение методов, одинакового числа групп и сокращённого набора признаков.
-    pd.crosstab(assignments["CLOPE"], assignments["k-modes"]).to_csv(
-        RESULTS_DIR / "cross_method_contingency.csv"
-    )
-    comparison_ari = float(adjusted_rand_score(assignments["CLOPE"], assignments["k-modes"]))
-    save_json("summary.json", {
-        "n": len(encoded_data),
-        "p": encoded_data.shape[1],
-        "selection_sample_size": SAMPLE_SIZE,
-        "validation_sample_size": SAMPLE_SIZE,
-        "sample_seed": SAMPLE_SEED,
-        "distance": "normalized Hamming; Gower for complete nominal data with equal weights",
-        "selection_rule": "CLOPE: maximum Profit over three orders at each r; then maximum selection silhouette; no target used",
-        "quality_evaluation": "exact full-data Hamming distances, modal compactness and silhouette via category counts",
-        "selected": selected_models,
-        "cross_method_ARI": comparison_ari,
-    })
-    compare_same_cluster_count(
-        encoded_data, assignments, fitted_results, validation_indices, validation_distances
-    )
-    compare_clope_cluster_counts(encoded_data, fitted_results)
-    evaluate_feature_sensitivity(features, encoded_data, assignments, selected_models)
-
-    # 4. Рисунки для отчёта и итоговые метрики в консоли.
-    make_figures(pd.DataFrame(search_rows), assignments, silhouettes)
     print(metrics.to_string(index=False), flush=True)
     print("Cross-method ARI:", comparison_ari, flush=True)
 

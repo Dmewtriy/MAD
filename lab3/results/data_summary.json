@@ -23,16 +23,13 @@
   ],
   "target": "y",
   "duplicates_raw": 0,
-  "duplicates_features": 0,
   "duplicates_after_binning": 6939,
   "missing_cells": 0,
-  "unknown_rows": 37369,
   "duration_quartiles": [
     103.0,
     180.0,
     319.0
   ],
-  "positive_rate": 0.11698480458295547,
   "prepared_levels": {
     "age": [
       "18-30",
